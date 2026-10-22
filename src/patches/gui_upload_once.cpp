@@ -3,7 +3,6 @@
 //
 
 #include "gui_upload_once.h"
-#include "dk2/utils/AABB.h"
 #include "dk2/CDefaultPlayerInterface.h"
 #include "dk2/RtGuiView.h"
 #include "dk2/components/CGameComponent.h"
@@ -12,7 +11,6 @@
 #include "dk2_globals.h"
 #include <tools/flame_config.h>
 #include <Windows.h>
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -129,69 +127,6 @@ namespace {
         return shadow;
     }
 
-    // what is known about each tile of a view's pixels, from watching everything that writes them:
-    // printText, the clears and sub_42C7D0 (no other code in DKII touches a view's pixels)
-    enum TileState : uint8_t {
-        TS_Unknown = 0,  // anything may have been printed on it
-        TS_Wiped,        // every pixel is wipeColor()
-        TS_Zero,         // every pixel is 0
-    };
-
-    struct Track {
-        void *lpSurface = nullptr;
-        LONG lPitch = 0;
-        uint32_t width_128blocks = 0;
-        uint32_t height_32blocks = 0;
-        uint32_t dwRGBBitCount = 0;
-        std::vector<uint8_t> state;    // TileState
-        std::vector<uint8_t> written;  // 1 = pixels may have changed since the tile was last uploaded
-    };
-
-    std::map<dk2::RtGuiView *, Track> g_tracks;
-    Track *g_curTrack = nullptr;  // track of the view being uploaded
-
-    Track &trackFor(dk2::RtGuiView *view) {
-        Track &track = g_tracks[view];
-        if (track.lpSurface != view->surf.lpSurface || track.lPitch != view->surf.lPitch ||
-            track.width_128blocks != view->width_128blocks || track.height_32blocks != view->height_32blocks ||
-            track.dwRGBBitCount != view->dwRGBBitCount) {
-            size_t tiles = view->width_128blocks * view->height_32blocks;
-            track.lpSurface = view->surf.lpSurface;
-            track.lPitch = view->surf.lPitch;
-            track.width_128blocks = view->width_128blocks;
-            track.height_32blocks = view->height_32blocks;
-            track.dwRGBBitCount = view->dwRGBBitCount;
-            track.state.assign(tiles, TS_Unknown);
-            track.written.assign(tiles, 1);
-        }
-        return track;
-    }
-
-    void fillTile(dk2::RtGuiView *view, unsigned int tx, unsigned int ty, uint32_t color) {
-        unsigned int bpp = view->surf.desc.dwRGBBitCount;
-        unsigned int rowDwords = (128 * bpp) >> 5;
-        char *row = (char *) view->surf.lpSurface + ty * 32 * view->surf.lPitch + tx * 128 * (bpp / 8);
-        for (int y = 0; y < 32; ++y) {
-            auto *px = (uint32_t *) row;
-            for (unsigned int x = 0; x < rowDwords; ++x) px[x] = color;
-            row += view->surf.lPitch;
-        }
-    }
-
-    bool tileIs(dk2::RtGuiView *view, unsigned int tx, unsigned int ty, uint32_t color) {
-        unsigned int bpp = view->surf.desc.dwRGBBitCount;
-        unsigned int rowDwords = (128 * bpp) >> 5;
-        const char *row = (const char *) view->surf.lpSurface + ty * 32 * view->surf.lPitch + tx * 128 * (bpp / 8);
-        for (int y = 0; y < 32; ++y) {
-            auto *px = (const uint32_t *) row;
-            for (unsigned int x = 0; x < rowDwords; ++x) {
-                if (px[x] != color) return false;
-            }
-            row += view->surf.lPitch;
-        }
-        return true;
-    }
-
     // ---- gui-trace timers ----
 
     LONGLONG g_timerTicks[patch::gui_upload_once::GT_Count] = {};
@@ -215,11 +150,6 @@ namespace {
         unsigned long long bytes = 0;
         unsigned int tilesDrawn = 0;
         unsigned int tilesBlank = 0;  // not drawn
-        unsigned int tilesUnwritten = 0;  // not compared: nothing wrote them since their last upload
-        unsigned int tilesCleared = 0;  // filled by a clear
-        unsigned int tilesClearSkipped = 0;  // not filled by a clear: they already hold its color
-        unsigned int extentFallbacks = 0;  // printText without a usable extent: whole view marked written
-        unsigned int missed = 0;  // verify: tiles the tracking was wrong about (fixed when found)
     };
 
     const std::map<size_t, const char *> c_viewNames = {
@@ -301,33 +231,25 @@ namespace {
             total.bytes += stats.bytes;
             total.tilesDrawn += stats.tilesDrawn;
             total.tilesBlank += stats.tilesBlank;
-            total.tilesUnwritten += stats.tilesUnwritten;
-            total.tilesCleared += stats.tilesCleared;
-            total.tilesClearSkipped += stats.tilesClearSkipped;
-            total.extentFallbacks += stats.extentFallbacks;
-            total.missed += stats.missed;
-            fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f (unwritten=%8.1f) KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f cleared/frame=%8.1f clearSkipped/frame=%8.1f fallbacks=%u missed=%u  %s\n",
+            fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f  %s\n",
                     seconds, fps, paused, g_frames,
                     stats.requests / frames, stats.uploads / frames, stats.tiles / frames, stats.tilesSkipped / frames,
-                    stats.tilesUnwritten / frames, stats.bytes / frames / 1024.0f, stats.tilesDrawn / frames,
-                    stats.tilesBlank / frames, stats.tilesCleared / frames, stats.tilesClearSkipped / frames,
-                    stats.extentFallbacks, stats.missed, viewName(view).c_str());
+                    stats.bytes / frames / 1024.0f, stats.tilesDrawn / frames, stats.tilesBlank / frames,
+                    viewName(view).c_str());
         }
-        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f (unwritten=%8.1f) KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f cleared/frame=%8.1f clearSkipped/frame=%8.1f fallbacks=%u missed=%u  TOTAL\n",
+        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f  TOTAL\n",
                 seconds, fps, paused, g_frames,
                 total.requests / frames, total.uploads / frames, total.tiles / frames, total.tilesSkipped / frames,
-                total.tilesUnwritten / frames, total.bytes / frames / 1024.0f, total.tilesDrawn / frames,
-                total.tilesBlank / frames, total.tilesCleared / frames, total.tilesClearSkipped / frames,
-                total.extentFallbacks, total.missed);
+                total.bytes / frames / 1024.0f, total.tilesDrawn / frames, total.tilesBlank / frames);
         // exclusive times: a timer stops while one nested in it runs (e.g. text excludes a wipe it does)
         LARGE_INTEGER freq;
         QueryPerformanceFrequency(&freq);
         auto ms = [&](int timer) { return (double) g_timerTicks[timer] * 1000.0 / (double) freq.QuadPart / frames; };
-        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u ms/frame: wipe=%7.3f text=%7.3f compare=%7.3f upload=%7.3f draw=%7.3f verify=%7.3f  TIMINGS\n",
+        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u ms/frame: wipe=%7.3f text=%7.3f compare=%7.3f upload=%7.3f draw=%7.3f  TIMINGS\n",
                 seconds, fps, paused, g_frames,
                 ms(patch::gui_upload_once::GT_Wipe), ms(patch::gui_upload_once::GT_Text),
                 ms(patch::gui_upload_once::GT_Compare), ms(patch::gui_upload_once::GT_Upload),
-                ms(patch::gui_upload_once::GT_Draw), ms(patch::gui_upload_once::GT_Verify));
+                ms(patch::gui_upload_once::GT_Draw));
         fflush(g_log);
     }
 
@@ -368,7 +290,6 @@ bool patch::gui_upload_once::deferUpload(dk2::CDefaultPlayerInterface *defplif, 
 }
 
 void patch::gui_upload_once::beginUpload(dk2::RtGuiView *view) {
-    g_curTrack = &trackFor(view);
     if (!*o_guiDirtyTiles) {
         if (!g_shadows.empty()) g_shadows.clear();  // free the copies, and don't trust them if re-enabled
         g_curShadow = nullptr;
@@ -380,24 +301,10 @@ void patch::gui_upload_once::beginUpload(dk2::RtGuiView *view) {
 bool patch::gui_upload_once::tileChanged(dk2::RtGuiView *view, unsigned int idx, int id, const char *pixels, int pitch) {
     Shadow *shadow = g_curShadow;
     if (shadow == nullptr || idx >= shadow->ids.size()) return true;
+    ScopedTimer timer(GT_Compare);
     char *copy = &shadow->pixels[idx * shadow->tileBytes];
     size_t rowBytes = shadow->tileBytes / 32;
     bool changed = shadow->ids[idx] != id;
-    if (!changed && g_curTrack && !g_curTrack->written[idx]) {
-        // nothing wrote it since it was uploaded
-        if (!*o_guiTrace) return false;
-        ScopedTimer timer(GT_Verify);
-        for (int y = 0; y < 32 && !changed; ++y) {
-            changed = memcmp(copy + y * rowBytes, pixels + y * pitch, rowBytes) != 0;
-        }
-        ViewStats &stats = statsFor(view);
-        if (!changed) {
-            stats.tilesUnwritten++;
-            return false;
-        }
-        stats.missed++;  // something wrote it without being tracked: upload it anyway
-    }
-    ScopedTimer timer(GT_Compare);
     for (int y = 0; y < 32 && !changed; ++y) {
         changed = memcmp(copy + y * rowBytes, pixels + y * pitch, rowBytes) != 0;
     }
@@ -446,8 +353,6 @@ patch::gui_upload_once::ScopedTimer::~ScopedTimer() {
 }
 
 void patch::gui_upload_once::endUpload(dk2::RtGuiView *view, unsigned int tilesUploaded, unsigned int tilesSkipped) {
-    if (g_curTrack) std::fill(g_curTrack->written.begin(), g_curTrack->written.end(), 0);  // textures are up to date
-    g_curTrack = nullptr;
     g_curShadow = nullptr;
     if (!*o_guiTrace) return;
     ViewStats &stats = statsFor(view);
@@ -458,103 +363,8 @@ void patch::gui_upload_once::endUpload(dk2::RtGuiView *view, unsigned int tilesU
 }
 
 void patch::gui_upload_once::onViewCreated(dk2::RtGuiView *view) {
-    // its textures and pixels are new, even if the buffer got the same address and size as before
+    // its textures are new, even if the buffer got the same address and size as before
     g_shadows.erase(view);
-    g_tracks.erase(view);
-}
-
-void patch::gui_upload_once::clearView(dk2::RtGuiView *view, uint32_t color) {
-    Track &track = trackFor(view);
-    uint8_t state = color == 0 ? TS_Zero : TS_Wiped;
-    bool verify = *o_guiTrace;
-    unsigned int cleared = 0;
-    unsigned int skipped = 0;
-    unsigned int missed = 0;
-    if (*o_guiDirtyTiles) {
-        // fill only the tiles that may hold something else. the result is the same as filling the whole view
-        for (unsigned int ty = 0; ty < view->height_32blocks; ++ty) {
-            for (unsigned int tx = 0; tx < view->width_128blocks; ++tx) {
-                unsigned int idx = tx + view->width_128blocks * ty;
-                if (track.state[idx] == state) {
-                    if (verify) {
-                        ScopedTimer timer(GT_Verify);
-                        if (!tileIs(view, tx, ty, color)) {
-                            missed++;  // something wrote it without being tracked: fill it anyway
-                            fillTile(view, tx, ty, color);
-                            track.written[idx] = 1;
-                            continue;
-                        }
-                    }
-                    skipped++;
-                    continue;
-                }
-                fillTile(view, tx, ty, color);
-                track.state[idx] = state;
-                track.written[idx] = 1;
-                cleared++;
-            }
-        }
-    } else {
-        if (color == 0) {
-            memset(view->blocksBuf, 0, view->blocksCount_bytes);  // as RtGuiView_sub_42CA70 and printText do
-        } else {
-            // as RtGuiView_42C9B0 does
-            unsigned int bpp = view->surf.desc.dwRGBBitCount;
-            unsigned int rowDwords = (view->width_128align * bpp) >> 5;
-            unsigned int pitchDwords = (unsigned int) view->surf.lPitch >> 2;
-            uint32_t *row = (uint32_t *) view->surf.lpSurface;
-            for (int y = 0; y < (int) view->height_32align; ++y) {
-                for (unsigned int x = 0; x < rowDwords; ++x) row[x] = color;
-                row += pitchDwords;
-            }
-        }
-        for (size_t idx = 0; idx < track.state.size(); ++idx) {
-            if (track.state[idx] == state) continue;  // pixels didn't change
-            track.state[idx] = state;
-            track.written[idx] = 1;
-        }
-        cleared = (unsigned int) track.state.size();
-    }
-    if (verify) {
-        ViewStats &stats = statsFor(view);
-        stats.tilesCleared += cleared;
-        stats.tilesClearSkipped += skipped;
-        stats.missed += missed;
-    }
-}
-
-void patch::gui_upload_once::onPrinted(dk2::RtGuiView *view, const dk2::AABB *extent) {
-    Track &track = trackFor(view);
-    unsigned int tx0 = 0, ty0 = 0;
-    unsigned int tx1 = view->width_128blocks;  // exclusive
-    unsigned int ty1 = view->height_32blocks;
-    bool usable = extent && extent->minX <= extent->maxX && extent->minY <= extent->maxY &&
-                  !(extent->minX == 0 && extent->minY == 0 && extent->maxX == 0 && extent->maxY == 0);
-    if (usable) {
-        // a few pixels more for glyphs that reach out of the laid out box. inclusive or exclusive max, both covered
-        const int pad = 2;
-        int minX = (std::max)(extent->minX - pad, 0);
-        int minY = (std::max)(extent->minY - pad, 0);
-        int maxX = extent->maxX + pad;
-        int maxY = extent->maxY + pad;
-        tx0 = (std::min)((unsigned int) minX / 128, tx1);
-        ty0 = (std::min)((unsigned int) minY / 32, ty1);
-        if (maxX < 0 || maxY < 0) {
-            tx1 = tx0;  // all left of or above the view: nothing to mark
-        } else {
-            tx1 = (std::min)((unsigned int) maxX / 128 + 1, tx1);
-            ty1 = (std::min)((unsigned int) maxY / 32 + 1, ty1);
-        }
-    } else if (*o_guiTrace) {
-        statsFor(view).extentFallbacks++;
-    }
-    for (unsigned int ty = ty0; ty < ty1; ++ty) {
-        for (unsigned int tx = tx0; tx < tx1; ++tx) {
-            unsigned int idx = tx + view->width_128blocks * ty;
-            track.state[idx] = TS_Unknown;
-            track.written[idx] = 1;
-        }
-    }
 }
 
 void patch::gui_upload_once::flushView(dk2::CDefaultPlayerInterface *defplif, dk2::RtGuiView *view) {
