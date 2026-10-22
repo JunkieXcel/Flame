@@ -63,34 +63,23 @@ namespace {
         state.ww240 *= (float) height * 4.0f / 3.0f / (float) width;
     }
 
-    // settings in cycling order: 480, 600, 768, off
+    // reference heights in cycling order. flame:widescreen-fov itself can only be switched off in the config
     const int c_referenceHeights[] = {480, 600, 768};
-    constexpr int c_stateCount = ARRAYSIZE(c_referenceHeights) + 1;
-    constexpr int c_stateOff = ARRAYSIZE(c_referenceHeights);
+    constexpr int c_stateCount = ARRAYSIZE(c_referenceHeights);
 
     // direction: +1 forward, -1 back
     void stepSetting(int direction) {
-        int state;
-        if (!*o_widescreenFov) {
-            state = c_stateOff;
-        } else {
-            int refHeight = *o_widescreenFovReferenceHeight;
-            state = -1;
-            int below = -1;  // last preset lower than a custom height
-            for (int i = 0; i < ARRAYSIZE(c_referenceHeights); ++i) {
-                if (c_referenceHeights[i] == refHeight) state = i;
-                if (c_referenceHeights[i] < refHeight) below = i;
-            }
-            // a custom height steps to the neighbouring preset
-            if (state < 0) state = direction > 0 ? below : below + 1;
+        int refHeight = *o_widescreenFovReferenceHeight;
+        int state = -1;
+        int below = -1;  // last preset lower than a custom height
+        for (int i = 0; i < c_stateCount; ++i) {
+            if (c_referenceHeights[i] == refHeight) state = i;
+            if (c_referenceHeights[i] < refHeight) below = i;
         }
+        // a custom height steps to the neighbouring preset
+        if (state < 0) state = direction > 0 ? below : below + 1;
         state = ((state + direction) % c_stateCount + c_stateCount) % c_stateCount;
-        if (state == c_stateOff) {
-            o_widescreenFov.set(false);
-        } else {
-            o_widescreenFov.set(true);
-            o_widescreenFovReferenceHeight.set(c_referenceHeights[state]);
-        }
+        o_widescreenFovReferenceHeight.set(c_referenceHeights[state]);
         // the config is saved by the game loop when flame_config::changed()
     }
 
@@ -98,7 +87,7 @@ namespace {
         if (*o_widescreenFov) {
             swprintf(buf, count, L"%d", *o_widescreenFovReferenceHeight);
         } else {
-            swprintf(buf, count, L"off");
+            swprintf(buf, count, L"%d (disabled in config)", *o_widescreenFovReferenceHeight);
         }
     }
 
@@ -113,12 +102,9 @@ namespace {
 
         stepSetting(1);
 
-        char message[64];
-        if (*o_widescreenFov) {
-            snprintf(message, sizeof(message), "Widescreen FOV: 4:3 reference height %d", *o_widescreenFovReferenceHeight);
-        } else {
-            snprintf(message, sizeof(message), "Widescreen FOV: off");
-        }
+        char message[96];
+        snprintf(message, sizeof(message), "Widescreen FOV: 4:3 reference height %d%s",
+                 *o_widescreenFovReferenceHeight, *o_widescreenFov ? "" : " (disabled in config)");
         printf("[widescreen-fov] %s\n", message);
         dk2::ProbablyConsole_instance.appendOutput(message);
     }

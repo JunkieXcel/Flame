@@ -13,7 +13,7 @@ typedef struct DIDEVICEOBJECTDATA DIDEVICEOBJECTDATA;
 
 namespace patch::widescreen_fov {
 
-    // F9 cycles the 4:3 reference height: 480 -> 600 -> 768 -> off -> 480
+    // F9 cycles the 4:3 reference height: 480 -> 600 -> 768 -> 480
     void onKeyboard(DIDEVICEOBJECTDATA *data);
     void window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
