@@ -194,6 +194,7 @@ void dk2::CDefaultPlayerInterface::createSurfacesForView_42CDF0(RtGuiView *view)
             }
 
             if (patch::gui_upload_once::tileChanged(view, _idx, _id, linePos, lPitch)) {
+                patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Upload);
                 pBridge->v_f68_paintSurfToMapId(_id, &v15_surf, 1);
                 tilesUploaded++;
             } else {
@@ -790,7 +791,11 @@ int dk2::CDefaultPlayerInterface::sub_42C7D0(int a2_width, int a3_height, int a4
 }
 
 void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_y, int a5) {
+    patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Draw);
     patch::gui_upload_once::flushView(this, view);
+    const uint8_t *blankTiles = patch::gui_upload_once::blankTiles(view);  // after the upload that updates it
+    unsigned int tilesDrawn = 0;
+    unsigned int tilesBlank = 0;
     CBridge *pBridge = this->pGameSession->pBridge;
     CWorldEntry v19_worldEntry;
     v19_worldEntry.constructor();
@@ -811,6 +816,11 @@ void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_
             int v14 = 1;
             int v13 = 0;
             unsigned int idx = blockX + view->width_128blocks * blockY;
+            if (blankTiles && blankTiles[idx]) {
+                tilesBlank++;  // nothing printed on it
+                continue;
+            }
+            tilesDrawn++;
             int _id;
             if(patch::expand_surf_idx_array::enabled) {
                 int *newArrp31x400_ids = (int *) view->Arrp31x400_ids[0];
@@ -841,5 +851,42 @@ void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_
     }
     v22_tryLevel = -1;
     v21_renderInfo.destructor();
+    patch::gui_upload_once::onDraw(view, tilesDrawn, tilesBlank);
+}
+
+int dk2::CDefaultPlayerInterface::printText(
+        RtGuiView *a2_view, int a3_x, int a4_y, uint8_t *a5_mbstr, Bgraf *a6_color,
+        int a7, int a8, FontObj a9_font, int a10) {
+    // the text drawing is still the original code. it is wrapped only to time it for gui-trace
+    using printText_t = int(__thiscall *)(CDefaultPlayerInterface *, RtGuiView *, int, int, uint8_t *, Bgraf *, int, int, FontObj, int);
+    auto orig_printText = (printText_t) 0x0042CB60;  // its references are replaced, its code is untouched
+    int result;
+    {
+        patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Text);
+        result = orig_printText(this, a2_view, a3_x, a4_y, a5_mbstr, a6_color, a7, a8, a9_font, a10);
+    }
+    a9_font.destructor();  // the callee owns a by-value FontObj. the original destroys the copy passed to it
+    return result;
+}
+
+int dk2::RtGuiView_42C9B0(RtGuiView *view) {
+    patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
+    unsigned int bpp = view->surf.desc.dwRGBBitCount;
+    uint32_t color = patch::gui_upload_once::wipeColor(bpp);
+    unsigned int rowDwords = (view->width_128align * bpp) >> 5;
+    unsigned int pitchDwords = (unsigned int) view->surf.lPitch >> 2;
+    uint32_t *row = (uint32_t *) view->surf.lpSurface;
+    for (int y = 0; y < (int) view->height_32align; ++y) {
+        for (unsigned int x = 0; x < rowDwords; ++x) row[x] = color;
+        row += pitchDwords;
+    }
+    return (int) color;
+}
+
+int dk2::RtGuiView_sub_42CA70(RtGuiView *view, int a2_wipe) {
+    if (a2_wipe) return RtGuiView_42C9B0(view);
+    patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
+    memset(view->blocksBuf, 0, view->blocksCount_bytes);
+    return 0;
 }
 

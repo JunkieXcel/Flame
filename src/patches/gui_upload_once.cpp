@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <iterator>
 #include <map>
 #include <string>
 #include <utility>
@@ -35,10 +36,17 @@ flame_config::define_flame_option<bool> o_guiDirtyTiles(
     true
 );
 
+flame_config::define_flame_option<bool> o_guiSkipBlankTiles(
+    "flame:gui-skip-blank-tiles", flame_config::OG_Config,
+    "Don't draw the 128x32 tiles of a text view that have nothing printed on them\n"
+    "(needs flame:gui-dirty-tiles, which finds them while comparing)",
+    true
+);
+
 flame_config::define_flame_option<bool> o_guiTrace(
     "flame:debug:gui-trace", flame_config::OG_Config,
-    "Debug: once per second, write how often each in-game text view is uploaded per frame\n"
-    "to flame\\gui-trace.log",
+    "Debug: once per second, write how often each in-game text view is uploaded and drawn per frame,\n"
+    "and how long wiping, printing, comparing, uploading and drawing them takes, to flame\\gui-trace.log",
     false
 );
 
@@ -77,16 +85,33 @@ namespace {
         size_t tileBytes = 0;
         std::vector<char> pixels;
         std::vector<int> ids;  // texture id each tile was uploaded to. 0 = never uploaded
+        std::vector<uint8_t> blank;  // 1 = tile was uploaded with nothing printed on it
     };
 
     std::map<dk2::RtGuiView *, Shadow> g_shadows;
     Shadow *g_curShadow = nullptr;  // shadow of the view being uploaded
 
+    bool matches(const Shadow &shadow, dk2::RtGuiView *view) {
+        return shadow.lpSurface == view->surf.lpSurface && shadow.lPitch == view->surf.lPitch &&
+               shadow.width_128blocks == view->width_128blocks && shadow.height_32blocks == view->height_32blocks &&
+               shadow.dwRGBBitCount == view->dwRGBBitCount;
+    }
+
+    // every pixel is the color RtGuiView_42C9B0 wipes with, or zero as RtGuiView_sub_42CA70 clears with
+    bool isBlank(const char *tile, size_t bytes, uint32_t bpp) {
+        auto *px = (const uint32_t *) tile;
+        size_t count = bytes / 4;
+        uint32_t clear = px[0];
+        if (clear != 0 && clear != patch::gui_upload_once::wipeColor(bpp)) return false;
+        for (size_t i = 1; i < count; ++i) {
+            if (px[i] != clear) return false;
+        }
+        return true;
+    }
+
     Shadow &shadowFor(dk2::RtGuiView *view) {
         Shadow &shadow = g_shadows[view];
-        if (shadow.lpSurface != view->surf.lpSurface || shadow.lPitch != view->surf.lPitch ||
-            shadow.width_128blocks != view->width_128blocks || shadow.height_32blocks != view->height_32blocks ||
-            shadow.dwRGBBitCount != view->dwRGBBitCount) {
+        if (!matches(shadow, view)) {
             // view was (re)created with other pixels: everything must be uploaded again
             size_t tiles = view->width_128blocks * view->height_32blocks;
             shadow.lpSurface = view->surf.lpSurface;
@@ -97,8 +122,22 @@ namespace {
             shadow.tileBytes = 128 * 32 * (view->dwRGBBitCount / 8);
             shadow.pixels.assign(tiles * shadow.tileBytes, 0);
             shadow.ids.assign(tiles, 0);
+            shadow.blank.assign(tiles, 0);
         }
         return shadow;
+    }
+
+    // ---- gui-trace timers ----
+
+    LONGLONG g_timerTicks[patch::gui_upload_once::GT_Count] = {};
+    int g_timerStack[16];
+    int g_timerDepth = 0;
+    LONGLONG g_timerSegStart = 0;  // when the timer on top of the stack was (re)started
+
+    LONGLONG qpc() {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        return now.QuadPart;
     }
 
     // ---- gui-trace ----
@@ -109,6 +148,8 @@ namespace {
         unsigned int tiles = 0;
         unsigned int tilesSkipped = 0;
         unsigned long long bytes = 0;
+        unsigned int tilesDrawn = 0;
+        unsigned int tilesBlank = 0;  // not drawn
     };
 
     const std::map<size_t, const char *> c_viewNames = {
@@ -164,8 +205,13 @@ namespace {
         char timeStr[64];
         time_t now = time(nullptr);
         strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", localtime(&now));
-        fprintf(g_log, "=== gui-trace run started %s (gui-upload-once=%d gui-dirty-tiles=%d) ===\n",
-                timeStr, (int) *o_guiUploadOnce, (int) *o_guiDirtyTiles);
+        fprintf(g_log, "=== gui-trace run started %s (gui-upload-once=%d gui-dirty-tiles=%d gui-skip-blank-tiles=%d) ===\n",
+                timeStr, (int) *o_guiUploadOnce, (int) *o_guiDirtyTiles, (int) *o_guiSkipBlankTiles);
+        // the format text views are created with. tells how the wipe color's alpha is meant
+        dk2::MySurfDesc &desc = dk2::MyCEngineSurfDesc_argb32_instance.desc;
+        fprintf(g_log, "view format: bpp=%u R=%08X G=%08X B=%08X A=%08X wipe=%08X\n",
+                desc.dwRGBBitCount, desc.dwRBitMask, desc.dwGBitMask, desc.dwBBitMask, desc.dwRGBAlphaBitMask,
+                patch::gui_upload_once::wipeColor(desc.dwRGBBitCount));
         fflush(g_log);
         return true;
     }
@@ -183,22 +229,39 @@ namespace {
             total.tiles += stats.tiles;
             total.tilesSkipped += stats.tilesSkipped;
             total.bytes += stats.bytes;
-            fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f  %s\n",
+            total.tilesDrawn += stats.tilesDrawn;
+            total.tilesBlank += stats.tilesBlank;
+            fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f  %s\n",
                     seconds, fps, paused, g_frames,
                     stats.requests / frames, stats.uploads / frames, stats.tiles / frames, stats.tilesSkipped / frames,
-                    stats.bytes / frames / 1024.0f, viewName(view).c_str());
+                    stats.bytes / frames / 1024.0f, stats.tilesDrawn / frames, stats.tilesBlank / frames,
+                    viewName(view).c_str());
         }
-        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f  TOTAL\n",
+        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u requests/frame=%6.2f uploads/frame=%6.2f tiles/frame=%8.1f skipped/frame=%8.1f KB/frame=%9.1f drawn/frame=%8.1f blank/frame=%8.1f  TOTAL\n",
                 seconds, fps, paused, g_frames,
                 total.requests / frames, total.uploads / frames, total.tiles / frames, total.tilesSkipped / frames,
-                total.bytes / frames / 1024.0f);
+                total.bytes / frames / 1024.0f, total.tilesDrawn / frames, total.tilesBlank / frames);
+        // exclusive times: a timer stops while one nested in it runs (e.g. text excludes a wipe it does)
+        LARGE_INTEGER freq;
+        QueryPerformanceFrequency(&freq);
+        auto ms = [&](int timer) { return (double) g_timerTicks[timer] * 1000.0 / (double) freq.QuadPart / frames; };
+        fprintf(g_log, "t=%7.1fs fps=%6.1f paused=%d frames=%4u ms/frame: wipe=%7.3f text=%7.3f compare=%7.3f upload=%7.3f draw=%7.3f  TIMINGS\n",
+                seconds, fps, paused, g_frames,
+                ms(patch::gui_upload_once::GT_Wipe), ms(patch::gui_upload_once::GT_Text),
+                ms(patch::gui_upload_once::GT_Compare), ms(patch::gui_upload_once::GT_Upload),
+                ms(patch::gui_upload_once::GT_Draw));
         fflush(g_log);
+    }
+
+    void resetWindow() {
+        g_stats.clear();
+        g_frames = 0;
+        memset(g_timerTicks, 0, sizeof(g_timerTicks));
     }
 
     void traceFrame() {
         if (!*o_guiTrace) {
-            g_stats.clear();
-            g_frames = 0;
+            resetWindow();
             g_windowStart = 0;
             return;
         }
@@ -208,8 +271,7 @@ namespace {
         g_frames++;
         if (now - g_windowStart >= 1000) {
             writeStats(now);
-            g_stats.clear();
-            g_frames = 0;
+            resetWindow();
             g_windowStart = now;
         }
     }
@@ -239,6 +301,7 @@ void patch::gui_upload_once::beginUpload(dk2::RtGuiView *view) {
 bool patch::gui_upload_once::tileChanged(dk2::RtGuiView *view, unsigned int idx, int id, const char *pixels, int pitch) {
     Shadow *shadow = g_curShadow;
     if (shadow == nullptr || idx >= shadow->ids.size()) return true;
+    ScopedTimer timer(GT_Compare);
     char *copy = &shadow->pixels[idx * shadow->tileBytes];
     size_t rowBytes = shadow->tileBytes / 32;
     bool changed = shadow->ids[idx] != id;
@@ -250,7 +313,43 @@ bool patch::gui_upload_once::tileChanged(dk2::RtGuiView *view, unsigned int idx,
         memcpy(copy + y * rowBytes, pixels + y * pitch, rowBytes);
     }
     shadow->ids[idx] = id;
+    shadow->blank[idx] = isBlank(copy, shadow->tileBytes, shadow->dwRGBBitCount);
     return true;
+}
+
+const uint8_t *patch::gui_upload_once::blankTiles(dk2::RtGuiView *view) {
+    if (!*o_guiSkipBlankTiles || !*o_guiDirtyTiles) return nullptr;
+    auto it = g_shadows.find(view);
+    if (it == g_shadows.end() || !matches(it->second, view)) return nullptr;
+    return it->second.blank.data();
+}
+
+void patch::gui_upload_once::onDraw(dk2::RtGuiView *view, unsigned int tilesDrawn, unsigned int tilesBlank) {
+    if (!*o_guiTrace) return;
+    ViewStats &stats = statsFor(view);
+    stats.tilesDrawn += tilesDrawn;
+    stats.tilesBlank += tilesBlank;
+}
+
+uint32_t patch::gui_upload_once::wipeColor(uint32_t bpp) {
+    // as RtGuiView_42C9B0 computes it: black with the alpha top bit, per pixel at 32bpp or per pixel pair at 16bpp
+    return bpp == 16 ? 0x80008000 : 0x80000000;
+}
+
+patch::gui_upload_once::ScopedTimer::ScopedTimer(GuiTimer timer) {
+    active = *o_guiTrace && g_timerDepth < (int) std::size(g_timerStack);
+    if (!active) return;
+    LONGLONG now = qpc();
+    if (g_timerDepth > 0) g_timerTicks[g_timerStack[g_timerDepth - 1]] += now - g_timerSegStart;  // pause the outer timer
+    g_timerStack[g_timerDepth++] = timer;
+    g_timerSegStart = now;
+}
+
+patch::gui_upload_once::ScopedTimer::~ScopedTimer() {
+    if (!active) return;
+    LONGLONG now = qpc();
+    g_timerTicks[g_timerStack[--g_timerDepth]] += now - g_timerSegStart;
+    g_timerSegStart = now;  // resume the outer timer
 }
 
 void patch::gui_upload_once::endUpload(dk2::RtGuiView *view, unsigned int tilesUploaded, unsigned int tilesSkipped) {
