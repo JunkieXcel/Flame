@@ -126,11 +126,12 @@ namespace {
         dk2::Bgraf pixelMask {brightness, brightness, brightness, 0, 0};
         uint8_t textMb[128];
         dk2::UniToMb_convert((wchar_t *) text, textMb, sizeof(textMb));
+        // last argument 0: don't upload the whole view after this text, "Back" (drawn later) uploads it
         return defplif->printText(
             &defplif->_options,
             pos.x, pos.y, textMb,
             &pixelMask,
-            0x11, 0, dk2::FontObj_3_instance, 1
+            0x11, 0, dk2::FontObj_3_instance, 0
         );
     }
 

@@ -67,11 +67,8 @@ dk2::WindowCfg *GameOptions_GraphicsOptions_layout() {
         BT_CClickButton, 3, 0, dk2::CButton_handleLeftClick_42A330, NULL, 0, 0, 0x00000000, 0x00000000, 0,
         160, 560, 1240, 72, 0, 0, 1080, 72, 0, NULL, dk2::CButton_render_42A160, 0x00000000, 0, 0x00000000, 0x00000001, 21
     };
-    buttons.emplace_back() = {  // Back
-        BT_CClickButton, 3, 0, NULL, NULL, 25, 1, 0x00000000, 0x00000000, 0,
-        1280, 1100, 1240, 72, 0, 0, 1240, 96, 0, NULL, dk2::CButton_render_428A30, 0x00000002, 20, 0x000000B9, 0x00000001, 23
-    };
-    // Flame: free slot in the right column below "Shadow Detail Level"
+    // Flame: free slot in the right column below "Shadow Detail Level".
+    // these draw without uploading the view, so they must stay before "Back", which uploads it
     buttons.emplace_back() = patch::widescreen_fov::GraphicsOptions_WidescreenFovTitle_btn(
         {1280, 480, 1240, 72},
         {0, 0, 1240, 72}
@@ -80,6 +77,10 @@ dk2::WindowCfg *GameOptions_GraphicsOptions_layout() {
         {1420, 560, 1100, 72},
         {0, 0, 1080, 72}
     );
+    buttons.emplace_back() = {  // Back
+        BT_CClickButton, 3, 0, NULL, NULL, 25, 1, 0x00000000, 0x00000000, 0,
+        1280, 1100, 1240, 72, 0, 0, 1240, 96, 0, NULL, dk2::CButton_render_428A30, 0x00000002, 20, 0x000000B9, 0x00000001, 23
+    };
 
     buttons.emplace_back() = EngOfButtonList;
 
