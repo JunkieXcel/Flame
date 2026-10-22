@@ -4,6 +4,8 @@
 
 #include "widescreen_fov.h"
 #include "dk2/CBridge.h"
+#include "dk2/CDefaultPlayerInterface.h"
+#include "dk2/button/button_types.h"
 #include "dk2/CCamera.h"
 #include "dk2/CPCEngineInterface.h"
 #include "dk2/MyWindow.h"
@@ -61,31 +63,55 @@ namespace {
         state.ww240 *= (float) height * 4.0f / 3.0f / (float) width;
     }
 
+    // settings in cycling order: 480, 600, 768, off
     const int c_referenceHeights[] = {480, 600, 768};
+    constexpr int c_stateCount = ARRAYSIZE(c_referenceHeights) + 1;
+    constexpr int c_stateOff = ARRAYSIZE(c_referenceHeights);
+
+    // direction: +1 forward, -1 back
+    void stepSetting(int direction) {
+        int state;
+        if (!*o_widescreenFov) {
+            state = c_stateOff;
+        } else {
+            int refHeight = *o_widescreenFovReferenceHeight;
+            state = -1;
+            int below = -1;  // last preset lower than a custom height
+            for (int i = 0; i < ARRAYSIZE(c_referenceHeights); ++i) {
+                if (c_referenceHeights[i] == refHeight) state = i;
+                if (c_referenceHeights[i] < refHeight) below = i;
+            }
+            // a custom height steps to the neighbouring preset
+            if (state < 0) state = direction > 0 ? below : below + 1;
+        }
+        state = ((state + direction) % c_stateCount + c_stateCount) % c_stateCount;
+        if (state == c_stateOff) {
+            o_widescreenFov.set(false);
+        } else {
+            o_widescreenFov.set(true);
+            o_widescreenFovReferenceHeight.set(c_referenceHeights[state]);
+        }
+        // the config is saved by the game loop when flame_config::changed()
+    }
+
+    void formatSetting(wchar_t *buf, size_t count) {
+        if (*o_widescreenFov) {
+            swprintf(buf, count, L"%d", *o_widescreenFovReferenceHeight);
+        } else {
+            swprintf(buf, count, L"off");
+        }
+    }
+
     // dinput and window messages can both report the same press
     constexpr DWORD c_hotkeyRepeatMs = 250;
     DWORD g_lastHotkeyMs = 0;
 
-    void cycleReferenceHeight() {
+    void onHotkey() {
         DWORD now = GetTickCount();
         if (g_lastHotkeyMs != 0 && now - g_lastHotkeyMs < c_hotkeyRepeatMs) return;
         g_lastHotkeyMs = now;
 
-        if (!*o_widescreenFov) {
-            o_widescreenFov.set(true);
-            o_widescreenFovReferenceHeight.set(c_referenceHeights[0]);
-        } else {
-            int next = 0;
-            for (int h : c_referenceHeights) {
-                if (h > *o_widescreenFovReferenceHeight) {
-                    next = h;
-                    break;
-                }
-            }
-            if (next != 0) o_widescreenFovReferenceHeight.set(next);
-            else o_widescreenFov.set(false);
-        }
-        // the config is saved by the game loop when flame_config::changed()
+        stepSetting(1);
 
         char message[64];
         if (*o_widescreenFov) {
@@ -97,15 +123,70 @@ namespace {
         dk2::ProbablyConsole_instance.appendOutput(message);
     }
 
+    void __cdecl CButton_handleLeftClick_WidescreenFovSwitch(int arg1, int arg2, dk2::CFrontEndComponent *front) {
+        stepSetting(1);
+    }
+
+    void __cdecl CButton_handleRightClick_WidescreenFovSwitch(int arg1, int arg2, dk2::CFrontEndComponent *front) {
+        stepSetting(-1);
+    }
+
+    int printButtonText(dk2::CButton *btn, dk2::CDefaultPlayerInterface *defplif, const wchar_t *text, bool highlightOnHover) {
+        if (btn->f5D_isVisible != 1) return 0;
+        dk2::AABB tmp;
+        dk2::Area4i pos = *(dk2::Area4i *) defplif->cgui_manager.scaleAabb_2560_1920(&tmp, (dk2::AABB *) &btn->pos);
+        unsigned __int8 brightness = 0xFF;
+        if (highlightOnHover && (!btn->f34_idxHigh || !btn->f45_containsCursor)) brightness = -56;
+        dk2::Bgraf pixelMask {brightness, brightness, brightness, 0, 0};
+        uint8_t textMb[128];
+        dk2::UniToMb_convert((wchar_t *) text, textMb, sizeof(textMb));
+        return defplif->printText(
+            &defplif->_options,
+            pos.x, pos.y, textMb,
+            &pixelMask,
+            0x11, 0, dk2::FontObj_3_instance, 1
+        );
+    }
+
+    int __cdecl CClickButton_render_WidescreenFovTitle(dk2::CButton *btn, dk2::CDefaultPlayerInterface *defplif) {
+        return printButtonText(btn, defplif, L"Widescreen camera", false);
+    }
+
+    int __cdecl CClickButton_render_WidescreenFovSwitch(dk2::CButton *btn, dk2::CDefaultPlayerInterface *defplif) {
+        wchar_t setting[16];
+        formatSetting(setting, ARRAYSIZE(setting));
+        wchar_t text[64];
+        swprintf(text, ARRAYSIZE(text), L"4:3 reference height: %s", setting);
+        return printButtonText(btn, defplif, text, true);
+    }
+
 }
 
 void patch::widescreen_fov::onKeyboard(DIDEVICEOBJECTDATA *data) {  // if dinput is used
     bool isPressed = (data->dwData & 0x80) != 0;
-    if (data->dwOfs == DIK_F9 && isPressed) cycleReferenceHeight();
+    if (data->dwOfs == DIK_F9 && isPressed) onHotkey();
 }
 
 void patch::widescreen_fov::window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
-    if (Msg == WM_KEYDOWN && wParam == VK_F9 && (lParam & (1 << 30)) == 0) cycleReferenceHeight();
+    if (Msg == WM_KEYDOWN && wParam == VK_F9 && (lParam & (1 << 30)) == 0) onHotkey();
+}
+
+dk2::ButtonCfg patch::widescreen_fov::GraphicsOptions_WidescreenFovTitle_btn(dk2::Area4s a1, dk2::Area4s a2) {
+    return {  // title "Widescreen camera"
+        BT_CClickButton, 3, 0, NULL, NULL, 0, 0, 0x00000000, 0x00000000, 0,
+        a1.x, a1.y, (uint16_t) a1.w, (uint16_t) a1.h,
+        (uint16_t) a2.x, (uint16_t) a2.y, (uint16_t) a2.w, (uint16_t) a2.h,
+        0, NULL, CClickButton_render_WidescreenFovTitle, 0x00000000, 0, 0x00000000, 0x00000000, 0
+    };
+}
+
+dk2::ButtonCfg patch::widescreen_fov::GraphicsOptions_WidescreenFovSwitch_btn(dk2::Area4s a1, dk2::Area4s a2) {
+    return {  // widescreen camera switch: left click forward, right click back
+        BT_CClickButton, 3, 0, CButton_handleLeftClick_WidescreenFovSwitch, CButton_handleRightClick_WidescreenFovSwitch, 0, 0, 0x00000000, 0x00000000, 0,
+        a1.x, a1.y, (uint16_t) a1.w, (uint16_t) a1.h,
+        (uint16_t) a2.x, (uint16_t) a2.y, (uint16_t) a2.w, (uint16_t) a2.h,
+        0, NULL, CClickButton_render_WidescreenFovSwitch, 0x00000000, 0, 0x00000000, 0x00000001, 21
+    };
 }
 
 void __cdecl dk2::MyCameraState_575A00(MyCameraState *state, float a2) {

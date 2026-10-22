@@ -8,6 +8,7 @@
 #include <dk2/button/button_types.h>
 #include <memory>
 #include <vector>
+#include <patches/widescreen_fov.h>
 #include "../../game_layout.h"
 
 namespace {
@@ -70,6 +71,15 @@ dk2::WindowCfg *GameOptions_GraphicsOptions_layout() {
         BT_CClickButton, 3, 0, NULL, NULL, 25, 1, 0x00000000, 0x00000000, 0,
         1280, 1100, 1240, 72, 0, 0, 1240, 96, 0, NULL, dk2::CButton_render_428A30, 0x00000002, 20, 0x000000B9, 0x00000001, 23
     };
+    // Flame: free slot in the right column below "Shadow Detail Level"
+    buttons.emplace_back() = patch::widescreen_fov::GraphicsOptions_WidescreenFovTitle_btn(
+        {1280, 480, 1240, 72},
+        {0, 0, 1240, 72}
+    );
+    buttons.emplace_back() = patch::widescreen_fov::GraphicsOptions_WidescreenFovSwitch_btn(
+        {1420, 560, 1100, 72},
+        {0, 0, 1080, 72}
+    );
 
     buttons.emplace_back() = EngOfButtonList;
 
