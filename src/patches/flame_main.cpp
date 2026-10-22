@@ -10,6 +10,7 @@
 #include <patches/game_version_patch.h>
 #include <patches/logging.h>
 #include <patches/big_resolution_fix/screen_resolution.h>
+#include <patches/framerate_independent_water.h>
 #include <stdexcept>
 #include <thread>
 #include <tools/flame_config.h>
@@ -125,6 +126,7 @@ void patch::flameInit(int argc, const char **argv) {
     patch::original_compatible::init();
     patch::protocol_dump::init();
     patch::screen_resolution::init();
+    patch::framerate_independent_water::init();
 
 #if __has_include(<dk2_research.h>)
     bug_hunter::init_keyWatcher();

@@ -136,6 +136,7 @@ add_library(${TARGET} SHARED
         patches/protocol_dump.cpp
         patches/registry_to_config.cpp
         patches/limit_tps.cpp
+        patches/framerate_independent_water.cpp
         patches/auto_network.cpp
         patches/scheduler.cpp
         patches/replace_heap.cpp
