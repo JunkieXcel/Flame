@@ -856,37 +856,60 @@ void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_
 
 int dk2::CDefaultPlayerInterface::printText(
         RtGuiView *a2_view, int a3_x, int a4_y, uint8_t *a5_mbstr, Bgraf *a6_color,
-        int a7, int a8, FontObj a9_font, int a10) {
-    // the text drawing is still the original code. it is wrapped only to time it for gui-trace
-    using printText_t = int(__thiscall *)(CDefaultPlayerInterface *, RtGuiView *, int, int, uint8_t *, Bgraf *, int, int, FontObj, int);
-    auto orig_printText = (printText_t) 0x0042CB60;  // its references are replaced, its code is untouched
-    int result;
-    {
-        patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Text);
-        result = orig_printText(this, a2_view, a3_x, a4_y, a5_mbstr, a6_color, a7, a8, a9_font, a10);
+        int a7_flags, int a8_clear, FontObj a9_font, int a10_upload) {
+    patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Text);
+    MySurface *prevSurf = g_myRenderSurface;
+    setDrawSurface(&a2_view->surf);
+    if (a8_clear) {
+        if (a2_view == &this->_options) {
+            RtGuiView_42C9B0(a2_view);
+        } else {
+            patch::gui_upload_once::ScopedTimer clearTimer(patch::gui_upload_once::GT_Wipe);
+            patch::gui_upload_once::clearView(a2_view, 0);
+        }
     }
-    a9_font.destructor();  // the callee owns a by-value FontObj. the original destroys the copy passed to it
-    return result;
+    int status;
+    a9_font.setColor(&status, a6_color);
+    a9_font.punk = (CButton *) ((char *) this + 0x57);
+
+    char renderer_buf[sizeof(MyTextRenderer)];
+    MyTextRenderer &renderer = *(MyTextRenderer *) renderer_buf;
+    renderer.constructor();
+    AABB box;
+    AABB extent{0, 0, 0, 0};  // the box the text was laid out in
+    if (a7_flags == 0) {
+        box = {a3_x, a4_y, 0x7FFF, 0x7FFF};
+    } else {
+        if (a7_flags & 1) renderer.selectMyCR(&status, 0);
+        else if (a7_flags & 4) renderer.selectMyCR(&status, 2);
+        else if (a7_flags & 2) renderer.selectMyCR(&status, 1);
+        else if (a7_flags & 8) renderer.selectMyCR(&status, 0);
+        if (a7_flags & 0x10) renderer.selectMyTR(&status, 4);
+        else if (a7_flags & 0x20) renderer.selectMyTR(&status, 5);
+        else if (a7_flags & 0x40) renderer.selectMyTR(&status, 2);
+        else if (a7_flags & 0x80) renderer.selectMyTR(&status, 4);
+        box = {a3_x, a4_y, a2_view->width, a2_view->height};
+    }
+    renderer.renderText(&status, &box, a5_mbstr, &a9_font, (uint32_t *) &extent);
+    renderer.destructor();
+    patch::gui_upload_once::onPrinted(a2_view, &extent);
+
+    setDrawSurface(prevSurf);
+    if (a10_upload) createSurfacesForView_42CDF0(a2_view);
+    return a9_font.destructor();  // the callee owns a by-value FontObj
 }
 
 int dk2::RtGuiView_42C9B0(RtGuiView *view) {
     patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
-    unsigned int bpp = view->surf.desc.dwRGBBitCount;
-    uint32_t color = patch::gui_upload_once::wipeColor(bpp);
-    unsigned int rowDwords = (view->width_128align * bpp) >> 5;
-    unsigned int pitchDwords = (unsigned int) view->surf.lPitch >> 2;
-    uint32_t *row = (uint32_t *) view->surf.lpSurface;
-    for (int y = 0; y < (int) view->height_32align; ++y) {
-        for (unsigned int x = 0; x < rowDwords; ++x) row[x] = color;
-        row += pitchDwords;
-    }
+    uint32_t color = patch::gui_upload_once::wipeColor(view->surf.desc.dwRGBBitCount);
+    patch::gui_upload_once::clearView(view, color);
     return (int) color;
 }
 
 int dk2::RtGuiView_sub_42CA70(RtGuiView *view, int a2_wipe) {
     if (a2_wipe) return RtGuiView_42C9B0(view);
     patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
-    memset(view->blocksBuf, 0, view->blocksCount_bytes);
+    patch::gui_upload_once::clearView(view, 0);
     return 0;
 }
 

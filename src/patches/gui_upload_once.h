@@ -8,6 +8,7 @@
 #include <cstdint>
 
 namespace dk2 {
+    struct AABB;
     struct CDefaultPlayerInterface;
     struct RtGuiView;
 }
@@ -36,6 +37,13 @@ namespace patch::gui_upload_once {
     // the color RtGuiView_42C9B0 fills a view with, as a dword
     uint32_t wipeColor(uint32_t bpp);
 
+    // fill the view with color (0 or wipeColor) as RtGuiView_42C9B0 / RtGuiView_sub_42CA70 / printText do.
+    // with flame:gui-dirty-tiles, fills only the tiles not known to hold that color already
+    void clearView(dk2::RtGuiView *view, uint32_t color);
+    // called by printText after it rendered text into the view. extent is the box renderText reported,
+    // nullptr if unknown. marks the tiles under it as written, so they are compared at the next upload
+    void onPrinted(dk2::RtGuiView *view, const dk2::AABB *extent);
+
     // gui-trace: time spent per frame. exclusive: a timer is paused while a timer nested in it runs
     enum GuiTimer {
         GT_Wipe,     // RtGuiView_42C9B0 / RtGuiView_sub_42CA70
@@ -43,6 +51,7 @@ namespace patch::gui_upload_once {
         GT_Compare,  // gui-dirty-tiles compare and copy
         GT_Upload,   // CBridge::v_f68_paintSurfToMapId
         GT_Draw,     // CDefaultPlayerInterface::sub_42CEE0
+        GT_Verify,   // gui-trace only: checking that tiles skipped as unwritten or already clear really are
         GT_Count
     };
     struct ScopedTimer {
