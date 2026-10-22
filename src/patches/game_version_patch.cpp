@@ -12,6 +12,6 @@ EXTERN_C __declspec(dllexport) char Flame_version[64] = {'\0', '1'};
 
 char *patch::game_version_patch::getFileVersion() {
     if(!enabled) return nullptr;
-    if(Flame_version[0] == '\0') return nullptr;
-    return Flame_version;
+    static char devVersion[] = "Flame - Alex dev build";
+    return devVersion;
 }
