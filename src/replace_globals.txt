@@ -42,6 +42,9 @@
 004B5E10 void CCreature::constructor()
 004B5F70 char *CCreature::deleting_destructor(char)
 
+# CRenderInfo
+004B3AD0 int CRenderInfo::fun_4B3AD0()
+
 # MyCreatureCollection
 004B5A10 int MyCreatureCollection::createCreatures(CWorld *)
 004B5FD0 void MyCreatureCollection::clear()
