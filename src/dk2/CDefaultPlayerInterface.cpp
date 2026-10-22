@@ -19,9 +19,56 @@
 #include "patches/big_resolution_fix/expand_surf_idx_array.h"
 #include "patches/micro_patches.h"
 #include "tools/bug_hunter.h"
+#include "tools/flame_config.h"
+#include <chrono>
 #if __has_include(<dk2_research.h>)
    #include <dk2_research.h>
 #endif
+
+
+flame_config::define_flame_option<bool> o_framerateIndependentScroll(
+    "flame:framerate-independent-scroll", flame_config::OG_Config,
+    "Scale camera scrolling by frame time so its speed does not depend on fps\n"
+    "Speed matches the game running with limit-tps=60 (16 ms per frame)",
+    true
+);
+
+namespace {
+
+    // dk2 moves the camera by a fixed amount every frame. with limit-tps=60 a frame is 16 ms
+    constexpr int64_t c_referenceFrameUs = 16000;
+    // don't let a stutter move the camera further than ~3 reference frames at once
+    constexpr int64_t c_maxFrameUs = 50000;
+
+    int64_t g_scrollLastUs = 0;
+    int64_t g_scrollFrameUs = c_referenceFrameUs;
+    int64_t g_scrollRemainderX = 0;
+    int64_t g_scrollRemainderY = 0;
+    int64_t g_rotateRemainder = 0;
+
+    void updateScrollFrameTime() {
+        // getTimeMs has ~16 ms resolution unless timeBeginPeriod was called, too coarse for high fps
+        int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t elapsed = g_scrollLastUs ? now - g_scrollLastUs : c_referenceFrameUs;
+        g_scrollLastUs = now;
+        if (elapsed < 0) elapsed = 0;
+        if (elapsed > c_maxFrameUs) elapsed = c_maxFrameUs;
+        g_scrollFrameUs = elapsed;
+    }
+
+    // value * (frame time / 16 ms), keeping the fractional part for the next frame
+    int scaleByFrameTime(int value, int64_t &remainder) {
+        if (value == 0) {
+            remainder = 0;
+            return 0;
+        }
+        int64_t scaled = (int64_t) value * g_scrollFrameUs + remainder;
+        remainder = scaled % c_referenceFrameUs;
+        return (int) (scaled / c_referenceFrameUs);
+    }
+
+}
 
 
 int dk2::CDefaultPlayerInterface::tickKeyboard2() {
@@ -38,6 +85,8 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
     if (v15_isLControl || v5_isLShift) ignoreModifiers = 1;
     int dwWidth = MyWindow_instance.dwWidth;
     int dwHeight = MyWindow_instance.dwHeight;
+    bool scaleScroll = *o_framerateIndependentScroll;
+    if (scaleScroll) updateScrollFrameTime();
 
     if (!patch::control_windowed_mode::enabled) {
         if (x < 5)
@@ -56,7 +105,7 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
             if (MyResources_instance.playerCfg.isAlternativeScroll) {
                 __int16 v7 = this->playerTagId;
                 GameAction v17_action;
-                v17_action.data1 = -64;
+                v17_action.data1 = scaleScroll ? -scaleByFrameTime(64, g_rotateRemainder) : -64;
                 v17_action.data2 = 0.0;
                 v17_action.data3 = 0;
                 v17_action.actionKind = 8;
@@ -72,7 +121,7 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
             if (MyResources_instance.playerCfg.isAlternativeScroll) {
                 __int16 f8__cpyToF10 = this->playerTagId;
                 GameAction v17_action;
-                v17_action.data1 = 64;
+                v17_action.data1 = scaleScroll ? scaleByFrameTime(64, g_rotateRemainder) : 64;
                 v17_action.data2 = 0.0;
                 v17_action.data3 = 0;
                 v17_action.actionKind = 8;
@@ -94,9 +143,15 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
         return 0;
     GameAction v17_action;
     v17_action.actionKind = 3;
-    v17_action.data1 = ((result * MyResources_instance.playerCfg.scrollSpeed) << 6) / 10;
+    int moveX = ((result * MyResources_instance.playerCfg.scrollSpeed) << 6) / 10;
     int v11 = (MyResources_instance.playerCfg.scrollSpeed * this->f1098) << 6;
-    v17_action.data2 = (v11 / 10);
+    int moveY = v11 / 10;
+    if (scaleScroll) {
+        moveX = scaleByFrameTime(moveX, g_scrollRemainderX);
+        moveY = scaleByFrameTime(moveY, g_scrollRemainderY);
+    }
+    v17_action.data1 = moveX;
+    v17_action.data2 = moveY;
     v17_action.data3 = 0;
     v17_action.playerTagId = this->playerTagId;
     v18_try_catch = 2;
