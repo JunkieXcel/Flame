@@ -2,6 +2,7 @@
 // Created by Alex on 22.10.2026.
 //
 
+#include "widescreen_fov.h"
 #include "dk2/CBridge.h"
 #include "dk2/CCamera.h"
 #include "dk2/CPCEngineInterface.h"
@@ -10,6 +11,8 @@
 #include "dk2_functions.h"
 #include "dk2_globals.h"
 #include <tools/flame_config.h>
+#include <dinput.h>
+#include <cstdio>
 
 
 flame_config::define_flame_option<bool> o_widescreenFov(
@@ -58,6 +61,51 @@ namespace {
         state.ww240 *= (float) height * 4.0f / 3.0f / (float) width;
     }
 
+    const int c_referenceHeights[] = {480, 600, 768};
+    // dinput and window messages can both report the same press
+    constexpr DWORD c_hotkeyRepeatMs = 250;
+    DWORD g_lastHotkeyMs = 0;
+
+    void cycleReferenceHeight() {
+        DWORD now = GetTickCount();
+        if (g_lastHotkeyMs != 0 && now - g_lastHotkeyMs < c_hotkeyRepeatMs) return;
+        g_lastHotkeyMs = now;
+
+        if (!*o_widescreenFov) {
+            o_widescreenFov.set(true);
+            o_widescreenFovReferenceHeight.set(c_referenceHeights[0]);
+        } else {
+            int next = 0;
+            for (int h : c_referenceHeights) {
+                if (h > *o_widescreenFovReferenceHeight) {
+                    next = h;
+                    break;
+                }
+            }
+            if (next != 0) o_widescreenFovReferenceHeight.set(next);
+            else o_widescreenFov.set(false);
+        }
+        // the config is saved by the game loop when flame_config::changed()
+
+        char message[64];
+        if (*o_widescreenFov) {
+            snprintf(message, sizeof(message), "Widescreen FOV: 4:3 reference height %d", *o_widescreenFovReferenceHeight);
+        } else {
+            snprintf(message, sizeof(message), "Widescreen FOV: off");
+        }
+        printf("[widescreen-fov] %s\n", message);
+        dk2::ProbablyConsole_instance.appendOutput(message);
+    }
+
+}
+
+void patch::widescreen_fov::onKeyboard(DIDEVICEOBJECTDATA *data) {  // if dinput is used
+    bool isPressed = (data->dwData & 0x80) != 0;
+    if (data->dwOfs == DIK_F9 && isPressed) cycleReferenceHeight();
+}
+
+void patch::widescreen_fov::window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    if (Msg == WM_KEYDOWN && wParam == VK_F9 && (lParam & (1 << 30)) == 0) cycleReferenceHeight();
 }
 
 void __cdecl dk2::MyCameraState_575A00(MyCameraState *state, float a2) {

@@ -11,6 +11,7 @@
 #include "patches/micro_patches.h"
 #include "patches/replace_mouse_dinput_to_user32.h"
 #include "patches/show_wireframe.h"
+#include "patches/widescreen_fov.h"
 #include "patches/use_wheel_to_zoom.h"
 
 
@@ -21,6 +22,7 @@ namespace dk2 {
         patch::use_wheel_to_zoom::window_proc(hWnd, Msg, wParam, lParam);
         patch::fix_keyboard_state_on_alt_tab::window_proc(hWnd, Msg, wParam, lParam);
         patch::show_wireframe::window_proc(hWnd, Msg, wParam, lParam);
+        patch::widescreen_fov::window_proc(hWnd, Msg, wParam, lParam);
         if(gog::BullfrogWindow_proc_patch::window_proc(hWnd, Msg, wParam, lParam))
             return DefWindowProcA(hWnd, Msg, wParam, lParam);
         switch (Msg) {

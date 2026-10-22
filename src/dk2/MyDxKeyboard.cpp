@@ -5,6 +5,7 @@
 #include "dk2/ControlKeysUpdater.h"
 #include "dk2/MouseRgbDxAction.h"
 #include "patches/show_wireframe.h"
+#include "patches/widescreen_fov.h"
 
 
 int dk2::MyDxKeyboard::processKeyboardData(int a2) {
@@ -24,6 +25,7 @@ int dk2::MyDxKeyboard::processKeyboardData(int a2) {
         this->f8_pcontrolkeys->v_fun4_keyboard((DxAction *) action);
         // hook::DIRECT_INPUT_KEYBOARD_DATA
         patch::show_wireframe::onKeyboard(i);
+        patch::widescreen_fov::onKeyboard(i);
         ++i;
         result = a2 - 1;
     }
