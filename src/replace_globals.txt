@@ -42,6 +42,9 @@
 004B5E10 void CCreature::constructor()
 004B5F70 char *CCreature::deleting_destructor(char)
 
+# MyCameraState
+00575A00 void __cdecl MyCameraState_575A00(MyCameraState *, float)
+
 # CRenderInfo
 004B3AD0 int CRenderInfo::fun_4B3AD0()
 
