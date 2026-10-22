@@ -17,6 +17,7 @@
 #include "dk2_memory.h"
 #include "gog_patch.h"
 #include "patches/big_resolution_fix/expand_surf_idx_array.h"
+#include "patches/gui_upload_once.h"
 #include "patches/micro_patches.h"
 #include "tools/bug_hunter.h"
 #include "tools/flame_config.h"
@@ -160,6 +161,10 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
 
 
 void dk2::CDefaultPlayerInterface::createSurfacesForView_42CDF0(RtGuiView *view) {
+    if (patch::gui_upload_once::deferUpload(this, view)) return;  // uploaded once before the view is drawn
+    patch::gui_upload_once::beginUpload(view);
+    unsigned int tilesUploaded = 0;
+    unsigned int tilesSkipped = 0;
     CBridge *pBridge = this->pGameSession->pBridge;
     char *rowPos = (char *) view->surf.lpSurface;
     int v4_bytesPerPix = view->dwRGBBitCount / 8;
@@ -188,12 +193,18 @@ void dk2::CDefaultPlayerInterface::createSurfacesForView_42CDF0(RtGuiView *view)
                 _id = view->Arrp31x400_ids[_idx];
             }
 
-            pBridge->v_f68_paintSurfToMapId(_id, &v15_surf, 1);
+            if (patch::gui_upload_once::tileChanged(view, _idx, _id, linePos, lPitch)) {
+                pBridge->v_f68_paintSurfToMapId(_id, &v15_surf, 1);
+                tilesUploaded++;
+            } else {
+                tilesSkipped++;  // texture already has these pixels
+            }
             linePos += v4_bytesPerPix * 128;
         }
         rowPos = &v10__allyWindowText[v13_lineSize];
         v10__allyWindowText += v13_lineSize;
     }
+    patch::gui_upload_once::endUpload(view, tilesUploaded, tilesSkipped);
 }
 
 void __cdecl dk2::CDefaultPlayerInterface_chatCallback(
@@ -730,6 +741,7 @@ int dk2::CDefaultPlayerInterface::sub_42C7D0(int a2_width, int a3_height, int a4
     if(patch::expand_surf_idx_array::enabled) {
         patch::expand_surf_idx_array::allocate(rtGuiView);
     }
+    patch::gui_upload_once::onViewCreated(rtGuiView);
     MySurfDesc v21_desc = MyCEngineSurfDesc_argb32_instance.desc;
 
     rtGuiView->height = a3_height;
@@ -778,6 +790,7 @@ int dk2::CDefaultPlayerInterface::sub_42C7D0(int a2_width, int a3_height, int a4
 }
 
 void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_y, int a5) {
+    patch::gui_upload_once::flushView(this, view);
     CBridge *pBridge = this->pGameSession->pBridge;
     CWorldEntry v19_worldEntry;
     v19_worldEntry.constructor();

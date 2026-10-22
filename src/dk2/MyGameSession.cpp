@@ -8,6 +8,7 @@
 #include "dk2/sound/TbSysCommand_Process.h"
 #include "dk2/entities/CPlayer.h"
 #include "math/int_float.h"
+#include "patches/gui_upload_once.h"
 
 int dk2::MyGameSession::tick(int a2_isNeedBlt) {
     int try_level;
@@ -322,6 +323,7 @@ int dk2::MyGameSession::tick(int a2_isNeedBlt) {
                         return result;
                 }
             }
+            patch::gui_upload_once::beforeDrawScene();
             int result = this->pBridge->v_f3C__drawScene();
             if (!result)
                 return result;
