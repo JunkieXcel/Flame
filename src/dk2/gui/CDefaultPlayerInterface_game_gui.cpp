@@ -9,6 +9,7 @@
 #include "dk2/entities/CObject.h"
 #include "dk2/entities/data/MyObjectDataObj.h"
 #include "dk2/gui/game/game_layout.h"
+#include "patches/gui_scale.h"
 
 
 int dk2::CDefaultPlayerInterface::fun_402D00(uint16_t a2_playerSceneId) {
@@ -31,7 +32,9 @@ int dk2::CDefaultPlayerInterface::fun_402D00(uint16_t a2_playerSceneId) {
     this->cgui_manager.createElements(game_layout(), this);
 
     this->f12AE = 1;
-    loadFontByScreenWidth(this->cgui_manager.width);
+    if (!patch::gui_scale::loadInGameFonts(this->cgui_manager.width, this->cgui_manager.height)) {
+        loadFontByScreenWidth(this->cgui_manager.width);
+    }
     this->sub_419180_loadSmth();
     this->sub_40AC40();
     this->renderInfo_F08.clear();

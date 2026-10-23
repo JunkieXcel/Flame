@@ -3,6 +3,7 @@
 //
 
 #include "gui_upload_once.h"
+#include "gui_scale.h"
 #include "dk2/utils/AABB.h"
 #include "dk2/CDefaultPlayerInterface.h"
 #include "dk2/RtGuiView.h"
@@ -638,8 +639,9 @@ void patch::gui_upload_once::onPrinted(dk2::RtGuiView *view, const dk2::AABB *ex
     bool usable = extent && extent->minX <= extent->maxX && extent->minY <= extent->maxY &&
                   !(extent->minX == 0 && extent->minY == 0 && extent->maxX == 0 && extent->maxY == 0);
     if (usable) {
-        // a few pixels more for glyphs that reach out of the laid out box. inclusive or exclusive max, both covered
-        const int pad = 2;
+        // a few pixels more for glyphs that reach out of the laid out box. inclusive or exclusive max, both covered.
+        // more with the bigger fonts of flame:gui-scale
+        const int pad = patch::gui_scale::glyphOverhang();
         int minX = (std::max)(extent->minX - pad, 0);
         int minY = (std::max)(extent->minY - pad, 0);
         int maxX = extent->maxX + pad;

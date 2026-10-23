@@ -139,6 +139,7 @@ add_library(${TARGET} SHARED
         patches/framerate_independent_water.cpp
         patches/widescreen_fov.cpp
         patches/gui_upload_once.cpp
+        patches/gui_scale.cpp
         patches/auto_network.cpp
         patches/scheduler.cpp
         patches/replace_heap.cpp
