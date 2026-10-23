@@ -9,6 +9,7 @@
 #include <dk2_functions.h>
 #include <dk2_globals.h>
 #include <patches/micro_patches.h>
+#include <patches/gui_scale.h>
 
 
 namespace dk2 {
@@ -361,6 +362,10 @@ char dk2::CFrontEndComponent::renderButtonsText_5329A0(
         MySurface *surf66_x16 = &this->surf66_x16[a3_x16Idx];
         this->surf66_x16[a3_x16Idx] = *v44_surf;
         this->surf66_x16[a3_x16Idx].allocSurfaceIfNot(&status);
+        if (!patch::gui_scale::checkBakedSurface(this->surf66_x16[a3_x16Idx], a3_x16Idx)) {
+            v91_localTextRenderer.destructor();
+            return 0;
+        }
         memset(
             this->surf66_x16[a3_x16Idx].lpSurface,
             0,
@@ -594,6 +599,10 @@ char dk2::CFrontEndComponent::bakeButton(int a2_wndId, unsigned __int8 x16Idx, i
     MySurface *curSurf2 = &this->surf66_x16[x16Idx];
     memcpy(&this->surf66_x16[x16Idx], templateSurf, sizeof(MySurface));
     this->surf66_x16[x16Idx].allocSurfaceIfNot(&status);
+    if (!patch::gui_scale::checkBakedSurface(this->surf66_x16[x16Idx], x16Idx)) {
+        textRenderer.destructor();
+        return 0;
+    }
     memset(
         this->surf66_x16[x16Idx].lpSurface,
         0,
@@ -857,8 +866,8 @@ BOOL __cdecl dk2::CListBox_renderTableStr(CListBox *a1_listBox, CFrontEndCompone
             wcsncat(cellStr, cell0 + 1, cell1 - cell0 - 1);
             if (UniToMb_convert(cellStr, MBStr_741120, 512)) {
                 AABB cellArea;
-                cellArea.minX = v33_rowArea.minX + 133;
-                cellArea.maxX = v33_rowArea.minX + 201;
+                cellArea.minX = v33_rowArea.minX + patch::gui_scale::listColumnX(133, a2_front->cgui_manager.width);
+                cellArea.maxX = v33_rowArea.minX + patch::gui_scale::listColumnX(201, a2_front->cgui_manager.width);
                 cellArea.minY = v33_rowArea.minY;
                 cellArea.maxY = v33_rowArea.maxY;
                 int v51_status;
@@ -874,8 +883,8 @@ BOOL __cdecl dk2::CListBox_renderTableStr(CListBox *a1_listBox, CFrontEndCompone
             wcsncat(cellStr, cell1 + 1, cell2 - cell1 - 1);
             if (UniToMb_convert(cellStr, MBStr_741120, 512)) {
                 AABB cellArea;
-                cellArea.minX = v33_rowArea.minX + 202;
-                cellArea.maxX = v33_rowArea.minX + 326;
+                cellArea.minX = v33_rowArea.minX + patch::gui_scale::listColumnX(202, a2_front->cgui_manager.width);
+                cellArea.maxX = v33_rowArea.minX + patch::gui_scale::listColumnX(326, a2_front->cgui_manager.width);
                 cellArea.minY = v33_rowArea.minY;
                 cellArea.maxY = v33_rowArea.maxY;
                 int status;
@@ -890,8 +899,8 @@ BOOL __cdecl dk2::CListBox_renderTableStr(CListBox *a1_listBox, CFrontEndCompone
             cell3 = wcsstr(cell2 + 1, L"#");
             wcsncat(cellStr, cell2 + 1, cell3 - cell2 - 1);
             if (UniToMb_convert(cellStr, MBStr_741120, 512)) {
-                cellArea.minX = v33_rowArea.minX + 326;
-                cellArea.maxX = v33_rowArea.minX + 365;
+                cellArea.minX = v33_rowArea.minX + patch::gui_scale::listColumnX(326, a2_front->cgui_manager.width);
+                cellArea.maxX = v33_rowArea.minX + patch::gui_scale::listColumnX(365, a2_front->cgui_manager.width);
                 cellArea.minY = v33_rowArea.minY;
                 cellArea.maxY = v33_rowArea.maxY;
                 int status;
@@ -908,7 +917,7 @@ BOOL __cdecl dk2::CListBox_renderTableStr(CListBox *a1_listBox, CFrontEndCompone
                 wcsncat(cellStr, cell3 + 1, cell4 - cell3 - 1);
                 if (UniToMb_convert(cellStr, MBStr_741120, 512)) {
                     cellArea.minX = v33_rowArea.minX;
-                    cellArea.maxX = v33_rowArea.minX + 365;
+                    cellArea.maxX = v33_rowArea.minX + patch::gui_scale::listColumnX(365, a2_front->cgui_manager.width);
                     cellArea.minY = v33_rowArea.minY;
                     cellArea.maxY = v33_rowArea.maxY;
                     {

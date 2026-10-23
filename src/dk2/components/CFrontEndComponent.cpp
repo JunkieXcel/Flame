@@ -11,6 +11,7 @@
 #include <dk2/network/protocol/NetMessage_65.h>
 #include <patches/auto_network.h>
 #include <patches/big_resolution_fix/screen_resolution.h>
+#include <patches/gui_scale.h>
 #include <weanetr_dll/MLDPlay.h>
 #include "dk2/CListBox_ItemHeightCfg.h"
 #include "dk2/engine/game_engine.h"
@@ -525,6 +526,8 @@ int dk2::CFrontEndComponent::launchGame() {
                this->isUseFe3d != 1,
                this->isUseFe3d == 1
                )) return 0;
+    patch::gui_scale::loadFrontEndFonts(screenWidth, screenHeight);  // before load() bakes the buttons
+    patch::gui_scale::scaleListColumns(screenWidth, screenHeight);
     this->pMyDdSurfaceEx = MyWindow_instance.getCurOffScreenSurf();
     int status;
     MyDdSurfaceEx_fillWithColor(
@@ -596,7 +599,8 @@ int dk2::CFrontEndComponent::launchGame() {
         CWindow *window = this->cgui_manager.findGameWindowById(pItemHeightCfg->winId);
         for (CButton *curBtn = window->f66_buttons; curBtn; curBtn = curBtn->f78_next) {
             if (curBtn->f70_id != f0_btnId) continue;
-            ((CListBox *) curBtn)->itemHeight = pItemHeightCfg->itemHeight;
+            ((CListBox *) curBtn)->itemHeight =
+                patch::gui_scale::listItemHeight(pItemHeightCfg->itemHeight, this->cgui_manager.height);
             break;
         }
     }
