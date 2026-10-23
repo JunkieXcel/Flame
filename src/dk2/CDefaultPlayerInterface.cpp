@@ -18,6 +18,7 @@
 #include "gog_patch.h"
 #include "patches/big_resolution_fix/expand_surf_idx_array.h"
 #include "patches/gui_upload_once.h"
+#include "patches/logging.h"
 #include "patches/micro_patches.h"
 #include "tools/bug_hunter.h"
 #include "tools/flame_config.h"
@@ -162,6 +163,7 @@ int dk2::CDefaultPlayerInterface::tickKeyboard2() {
 
 void dk2::CDefaultPlayerInterface::createSurfacesForView_42CDF0(RtGuiView *view) {
     if (patch::gui_upload_once::deferUpload(this, view)) return;  // uploaded once before the view is drawn
+    if (view->blocksBuf == nullptr) return;  // released: lpSurface points to the freed buffer
     patch::gui_upload_once::beginUpload(view);
     unsigned int tilesUploaded = 0;
     unsigned int tilesSkipped = 0;
@@ -742,6 +744,11 @@ int dk2::CDefaultPlayerInterface::sub_42C7D0(int a2_width, int a3_height, int a4
     if(patch::expand_surf_idx_array::enabled) {
         patch::expand_surf_idx_array::allocate(rtGuiView);
     }
+    if (rtGuiView->f297 && rtGuiView->blocksBuf) {
+        // created again without RtGuiView_sub_42C980: the original leaks the old buffer (up to 21 MB at 4K)
+        patch::log::err("%p gui view created again without release", rtGuiView);
+        RtGuiView_sub_42C980(rtGuiView);
+    }
     patch::gui_upload_once::onViewCreated(rtGuiView);
     MySurfDesc v21_desc = MyCEngineSurfDesc_argb32_instance.desc;
 
@@ -775,7 +782,7 @@ int dk2::CDefaultPlayerInterface::sub_42C7D0(int a2_width, int a3_height, int a4
                 pInt = &rtGuiView->Arrp31x400_ids[_x + rtGuiView->width_128blocks * _y];
             }
             if (!pBridge->v_createMyScaledSurface(g_temp_string, 128, 32, 257, pInt)) {
-                operator delete(rtGuiView->blocksBuf);
+                dk2::operator_delete(rtGuiView->blocksBuf);  // allocated by dk2::operator_new
                 rtGuiView->blocksBuf = NULL;
                 return FALSE;
             }
@@ -856,37 +863,74 @@ void dk2::CDefaultPlayerInterface::sub_42CEE0(RtGuiView *view, int a3_x, int a4_
 
 int dk2::CDefaultPlayerInterface::printText(
         RtGuiView *a2_view, int a3_x, int a4_y, uint8_t *a5_mbstr, Bgraf *a6_color,
-        int a7, int a8, FontObj a9_font, int a10) {
-    // the text drawing is still the original code. it is wrapped only to time it for gui-trace
-    using printText_t = int(__thiscall *)(CDefaultPlayerInterface *, RtGuiView *, int, int, uint8_t *, Bgraf *, int, int, FontObj, int);
-    auto orig_printText = (printText_t) 0x0042CB60;  // its references are replaced, its code is untouched
-    int result;
-    {
-        patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Text);
-        result = orig_printText(this, a2_view, a3_x, a4_y, a5_mbstr, a6_color, a7, a8, a9_font, a10);
+        int a7_flags, int a8_clear, FontObj a9_font, int a10_upload) {
+    patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Text);
+    if (a2_view->blocksBuf == nullptr) {
+        // released (RtGuiView_sub_42C980) or never created: its surf still points to the freed buffer.
+        // the original would memset a null blocksBuf or print into freed memory
+        patch::gui_upload_once::clearView(a2_view, 0);  // does nothing, counts it for gui-trace
+        return a9_font.destructor();
     }
-    a9_font.destructor();  // the callee owns a by-value FontObj. the original destroys the copy passed to it
-    return result;
+    MySurface *prevSurf = g_myRenderSurface;
+    setDrawSurface(&a2_view->surf);
+    if (a8_clear) {
+        if (a2_view == &this->_options) {
+            RtGuiView_42C9B0(a2_view);
+        } else {
+            patch::gui_upload_once::ScopedTimer clearTimer(patch::gui_upload_once::GT_Wipe);
+            patch::gui_upload_once::clearView(a2_view, 0);
+        }
+    }
+    int status;
+    a9_font.setColor(&status, a6_color);
+    a9_font.punk = (CButton *) ((char *) this + 0x57);
+
+    char renderer_buf[sizeof(MyTextRenderer)];
+    MyTextRenderer &renderer = *(MyTextRenderer *) renderer_buf;
+    renderer.constructor();
+    AABB box;
+    AABB extent{0, 0, 0, 0};  // the box the text was laid out in
+    if (a7_flags == 0) {
+        box = {a3_x, a4_y, 0x7FFF, 0x7FFF};
+    } else {
+        if (a7_flags & 1) renderer.selectMyCR(&status, 0);
+        else if (a7_flags & 4) renderer.selectMyCR(&status, 2);
+        else if (a7_flags & 2) renderer.selectMyCR(&status, 1);
+        else if (a7_flags & 8) renderer.selectMyCR(&status, 0);
+        if (a7_flags & 0x10) renderer.selectMyTR(&status, 4);
+        else if (a7_flags & 0x20) renderer.selectMyTR(&status, 5);
+        else if (a7_flags & 0x40) renderer.selectMyTR(&status, 2);
+        else if (a7_flags & 0x80) renderer.selectMyTR(&status, 4);
+        box = {a3_x, a4_y, a2_view->width, a2_view->height};
+    }
+    renderer.renderText(&status, &box, a5_mbstr, &a9_font, (uint32_t *) &extent);
+    renderer.destructor();
+    patch::gui_upload_once::onPrinted(a2_view, &extent);
+
+    setDrawSurface(prevSurf);
+    if (a10_upload) createSurfacesForView_42CDF0(a2_view);
+    return a9_font.destructor();  // the callee owns a by-value FontObj
+}
+
+void dk2::RtGuiView_sub_42C980(RtGuiView *view) {
+    patch::gui_upload_once::onViewReleased(view);
+    if (!view->f297) return;
+    dk2::operator_delete(view->blocksBuf);
+    view->blocksBuf = nullptr;  // as the original, surf and the sizes are left as they were
+    view->f297 = 0;
 }
 
 int dk2::RtGuiView_42C9B0(RtGuiView *view) {
     patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
-    unsigned int bpp = view->surf.desc.dwRGBBitCount;
-    uint32_t color = patch::gui_upload_once::wipeColor(bpp);
-    unsigned int rowDwords = (view->width_128align * bpp) >> 5;
-    unsigned int pitchDwords = (unsigned int) view->surf.lPitch >> 2;
-    uint32_t *row = (uint32_t *) view->surf.lpSurface;
-    for (int y = 0; y < (int) view->height_32align; ++y) {
-        for (unsigned int x = 0; x < rowDwords; ++x) row[x] = color;
-        row += pitchDwords;
-    }
+    uint32_t color = patch::gui_upload_once::wipeColor(view->surf.desc.dwRGBBitCount);
+    patch::gui_upload_once::clearView(view, color);
     return (int) color;
 }
 
 int dk2::RtGuiView_sub_42CA70(RtGuiView *view, int a2_wipe) {
     if (a2_wipe) return RtGuiView_42C9B0(view);
     patch::gui_upload_once::ScopedTimer timer(patch::gui_upload_once::GT_Wipe);
-    memset(view->blocksBuf, 0, view->blocksCount_bytes);
+    patch::gui_upload_once::clearView(view, 0);
     return 0;
 }
 

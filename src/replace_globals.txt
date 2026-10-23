@@ -18,6 +18,7 @@
 0042CDF0 void CDefaultPlayerInterface::createSurfacesForView_42CDF0(RtGuiView *)
 0042CEE0 void CDefaultPlayerInterface::sub_42CEE0(RtGuiView *, int, int, int)
 0042CB60 int CDefaultPlayerInterface::printText(RtGuiView *, int, int, uint8_t *, Bgraf *, int, int, FontObj, int)
+0042C980 void RtGuiView_sub_42C980(RtGuiView *)
 0042C9B0 int RtGuiView_42C9B0(RtGuiView *)
 0042CA70 int RtGuiView_sub_42CA70(RtGuiView *, int)
 
