@@ -13,6 +13,7 @@
 #include "dk2_functions.h"
 #include "dk2_globals.h"
 #include "patches/logging.h"
+#include "patches/gui/main/main_menu_load_game.h"
 #include "weanetr_dll/MLDPlay.h"
 
 
@@ -230,10 +231,11 @@ int __cdecl dk2::CButton_handleLeftClick_changeMenu(uint32_t idx, int command, C
                 comp->fun_536BA0(0, 0, 2079, 105, 0, 1, 0, 0, 0);
             }
         } break;
-        case 19:
+        case 19:  // Load Game back
             DirFileList_instance2_saves_sav.reset();
             comp->f30C1E = 0;
-            CFrontEndComponent_static_539490(0x110u, 29, comp);
+            // 29 ends in Single Player. opened from the main menu: 28 ends there, as Options and Extras back do
+            CFrontEndComponent_static_539490(0x110u, patch::main_menu_load_game::backToMainMenu() ? 28 : 29, comp);
             break;
         case 20: {
             DirFileList_instance2_saves_sav.collectFiles(MyResources_instance.savesDir, "*.sav", 1);

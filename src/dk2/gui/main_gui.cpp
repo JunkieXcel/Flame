@@ -13,6 +13,7 @@
 #include <dk2_globals.h>
 #include <patches/auto_network.h>
 #include <patches/gui/main/single_player/win_custom_campaign.h>
+#include <patches/gui/main/main_menu_load_game.h>
 
 
 typedef char (__cdecl *CButton_render_t)(dk2::CButton *btn, dk2::CFrontEndComponent *front);
@@ -386,6 +387,7 @@ void __cdecl dk2::CButton_handleLeftClick_538000(int a1_arg1, int a2_arg2,CFront
             g_pathAnimationEndSwitch = 25;
             break;
         case 7: {  // Load Game
+            patch::main_menu_load_game::onLoadGameOpened(v3_curWindowId);  // Single Player, or the main menu
             DirFileList_instance2_saves_sav.collectFiles(MyResources_instance.savesDir, "*.sav", 1);
             CButton *BtnBySomeId = a3_frontend->findBtnBySomeId(73, 8);
             if (BtnBySomeId)

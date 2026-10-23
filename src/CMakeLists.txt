@@ -153,6 +153,7 @@ add_library(${TARGET} SHARED
         patches/big_resolution_fix/screen_resolution.cpp
 
         patches/gui/main/main_layout.cpp
+        patches/gui/main/main_menu_load_game.cpp
         patches/gui/main/single_player/btn_custom_campaign.cpp
         patches/gui/main/single_player/win_custom_campaign.cpp
 
