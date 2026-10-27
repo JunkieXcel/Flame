@@ -16,6 +16,7 @@ namespace patch::autosave {
 
     void Autosave_tick();
     void updateLastAutoSaveTime();
+    bool isFrontEndSave(const char *savePath);
     dk2::ButtonCfg Save_AutosaveSwitch_btn(dk2::Area4s a1, dk2::Area4s a2);
     dk2::ButtonCfg Save_KeepLastAutosavesSwitch_btn(dk2::Area4s a1, dk2::Area4s a2);
 

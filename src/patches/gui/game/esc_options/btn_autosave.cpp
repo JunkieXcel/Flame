@@ -197,6 +197,7 @@ namespace {
 }
 
 void patch::autosave::Autosave_tick() {
+    if (dk2::MyResources_instance.gameCfg.useFe3d) return;  // front-end menu scene. saving it gives a corrupt FrontEnd3DLevel save
     if (dk2::MyResources_instance.gameCfg.useFe_playMode == 3) return;  // multiplayer
 
     auto *pGameSession = &dk2::CGameComponent_instance.gameSession;
@@ -235,6 +236,26 @@ void patch::autosave::Autosave_tick() {
 
 void patch::autosave::updateLastAutoSaveTime() {
     g_lastAutoSaveTime = dk2::getTimeMs();
+}
+
+bool patch::autosave::isFrontEndSave(const char *savePath) {
+    // the level name is stored as a null-terminated string at a fixed offset in the save header
+    constexpr long levelNameOffset = 0xC2;
+    char levelName[64] = {0};
+    FILE *f = fopen(savePath, "rb");
+    if (f == nullptr) return false;
+    if (fseek(f, levelNameOffset, SEEK_SET) == 0) {
+        fread(levelName, 1, sizeof(levelName) - 1, f);
+    }
+    fclose(f);
+    if (_stricmp(levelName, "FrontEnd3DLevel") != 0) return false;
+    patch::log::err("refusing to load front-end save: %s", savePath);
+    char msg[MAX_PATH + 128];
+    snprintf(msg, sizeof(msg),
+        "This save was made in the main menu scene (FrontEnd3DLevel) and is corrupt:\n%s\n\n"
+        "It will not be loaded. Please delete it or move it out of the Save folder.", savePath);
+    MessageBoxA(NULL, msg, "Flame: unable to load save", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    return true;
 }
 
 
