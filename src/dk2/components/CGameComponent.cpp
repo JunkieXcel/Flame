@@ -95,6 +95,8 @@ dk2::CComponent *dk2::CGameComponent::mainGuiLoop() {
             unicodeToUtf8(Buffer, MultiByteStr, MAX_PATH);
             char v41[MAX_PATH];
             _sprintf(v41, "%s%s", MyResources_instance.savesDir, MultiByteStr);
+            if (patch::autosave::isFrontEndSave(v41))
+                return NULL;
             CWorld_instance.showLoadingScreen();
             CWorld_instance.releaseSurface();
             CWorld_instance.fun_511180();
@@ -110,6 +112,8 @@ dk2::CComponent *dk2::CGameComponent::mainGuiLoop() {
             unicodeToUtf8(Buffer, MultiByteStr, 64);
             char v41[64];
             _sprintf(v41, "%s%s", MyResources_instance.savesDir, MultiByteStr);
+            if (patch::autosave::isFrontEndSave(v41))
+                return NULL;
             CWorld_instance.showLoadingScreen();
             CWorld_instance.releaseSurface();
             CWorld_instance.fun_511180();
