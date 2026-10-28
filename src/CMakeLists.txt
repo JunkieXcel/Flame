@@ -128,6 +128,7 @@ add_library(${TARGET} SHARED
         patches/flame_main.cpp
         patches/replace_mouse_dinput_to_user32.cpp
         patches/use_wheel_to_zoom.cpp
+        patches/use_wheel_to_scroll_lists.cpp
         patches/micro_patches.cpp
         patches/game_version_patch.cpp
         patches/logging.cpp

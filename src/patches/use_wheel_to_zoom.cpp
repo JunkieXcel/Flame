@@ -5,6 +5,7 @@
 #include "use_wheel_to_zoom.h"
 #include <windowsx.h>
 #include "dk2_globals.h"
+#include "use_wheel_to_scroll_lists.h"
 
 #include "logging.h"
 
@@ -17,6 +18,8 @@ void patch::use_wheel_to_zoom::window_proc(HWND hWnd, UINT Msg, WPARAM wParam, L
             DWORD xPos = GET_X_LPARAM(lParam);
             DWORD yPos = GET_Y_LPARAM(lParam);
             // patch::log::dbg("k=%08X d=%d {%d %d}", fwKeys, zDelta, xPos, yPos);
+            // a list under the cursor takes the wheel, so the camera does not zoom behind it
+            if(patch::use_wheel_to_scroll_lists::scroll_list_under_cursor((short) zDelta)) break;
             if(dk2::CGameComponent_instance.gameSession.pPlayer) {
                 dk2::CBridge_instance.camera.zoomRel_449CA0(-zDelta * 50);
             }
@@ -38,6 +41,7 @@ void patch::use_wheel_to_zoom::dinput_proc(DIDEVICEOBJECTDATA *data) {
             int mult = 80;
             if (tsDelta > 100) mult = 40;
             if (tsDelta > 500) mult = 20;
+            if(patch::use_wheel_to_scroll_lists::scroll_list_under_cursor(zDelta)) break;
             if(dk2::CGameComponent_instance.gameSession.pPlayer) {
                 dk2::CBridge_instance.camera.zoomRel_449CA0(-zDelta * mult);
             }
