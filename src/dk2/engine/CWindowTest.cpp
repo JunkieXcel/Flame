@@ -18,6 +18,7 @@
 #include "patches/show_wireframe.h"
 #include "patches/widescreen_fov.h"
 #include "patches/use_wheel_to_zoom.h"
+#include "patches/esc_goes_back.h"
 #if __has_include(<dk2_research.h>)
 #include <dk2_research.h>
 #endif
@@ -77,6 +78,7 @@ namespace dk2 {
         patch::remember_window_location_and_size::window_proc(hWnd, Msg, wParam, lParam);
         patch::replace_mouse_dinput_to_user32::emulate_dinput_from_user32(hWnd, Msg, wParam, lParam);
         patch::use_wheel_to_zoom::window_proc(hWnd, Msg, wParam, lParam);
+        patch::esc_goes_back::window_proc(hWnd, Msg, wParam, lParam);
         patch::fix_keyboard_state_on_alt_tab::window_proc(hWnd, Msg, wParam, lParam);
         patch::show_wireframe::window_proc(hWnd, Msg, wParam, lParam);
         patch::widescreen_fov::window_proc(hWnd, Msg, wParam, lParam);
