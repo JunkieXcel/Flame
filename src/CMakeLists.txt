@@ -130,6 +130,7 @@ add_library(${TARGET} SHARED
         patches/use_wheel_to_zoom.cpp
         patches/use_wheel_to_scroll_lists.cpp
         patches/esc_goes_back.cpp
+        patches/unity_bridge.cpp
         patches/micro_patches.cpp
         patches/game_version_patch.cpp
         patches/logging.cpp

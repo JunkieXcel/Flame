@@ -6,6 +6,7 @@
 #include "dk2/MyCESurfHandle.h"
 #include "patches/big_resolution_fix/big_resolution_fix.h"
 #include "patches/logging.h"
+#include "patches/unity_bridge.h"
 
 int dk2::configureFlagsAndTexturesCount() {
     DDCAPS caps;
@@ -69,6 +70,7 @@ int dk2::configureFlagsAndTexturesCount() {
 
 
 bool __cdecl dk2::engine_drawScene(char a1) {
+    patch::unity_bridge::write_frame();
     g_unused765204 = 0;
     engine_setViewport(0, 0, g_sc_sceneWidth, g_sc_sceneHeight);
     if ((MyDirectDraw_instance.flags & 1) != 0) {
