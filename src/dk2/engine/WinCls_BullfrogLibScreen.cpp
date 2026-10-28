@@ -13,6 +13,7 @@
 #include "patches/show_wireframe.h"
 #include "patches/widescreen_fov.h"
 #include "patches/use_wheel_to_zoom.h"
+#include "patches/esc_goes_back.h"
 
 
 namespace dk2 {
@@ -20,6 +21,7 @@ namespace dk2 {
     LRESULT CALLBACK BullfrogWindow_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {  // fullscreen proc
         patch::replace_mouse_dinput_to_user32::emulate_dinput_from_user32(hWnd, Msg, wParam, lParam);
         patch::use_wheel_to_zoom::window_proc(hWnd, Msg, wParam, lParam);
+        patch::esc_goes_back::window_proc(hWnd, Msg, wParam, lParam);
         patch::fix_keyboard_state_on_alt_tab::window_proc(hWnd, Msg, wParam, lParam);
         patch::show_wireframe::window_proc(hWnd, Msg, wParam, lParam);
         patch::widescreen_fov::window_proc(hWnd, Msg, wParam, lParam);
