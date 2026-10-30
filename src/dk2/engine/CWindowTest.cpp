@@ -19,6 +19,7 @@
 #include "patches/widescreen_fov.h"
 #include "patches/use_wheel_to_zoom.h"
 #include "patches/esc_goes_back.h"
+#include <tools/flame_config.h>
 #if __has_include(<dk2_research.h>)
 #include <dk2_research.h>
 #endif
@@ -275,7 +276,17 @@ void dk2::CWindowTest::reallocBackSurfaceToWindowSize() {
 }
 
 
+flame_config::define_flame_option<bool> o_keepRunningUnfocused(
+    "flame:keep-running-unfocused", flame_config::OG_Config,
+    "Windowed mode: keep the game running and drawing when its window isn't in front\n"
+    "(DKII pauses as soon as another window gets the focus). A minimised window still pauses",
+    false
+);
+
 int dk2::CWindowTest::isNeedBlt() {
+    // g_isNeedBlt_fullscr is cleared when the window is deactivated; the game loop then skips
+    // drawing and the game session's tick
+    if (*o_keepRunningUnfocused && this->hWnd && !IsIconic(this->hWnd)) return 1;
     return g_isNeedBlt_fullscr;
 }
 
