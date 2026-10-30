@@ -8,6 +8,7 @@
 #include <new>
 #include "dk2/CBridge.h"
 #include "dk2/CCamera.h"
+#include "dk2/CWorld.h"
 #include "dk2/utils/MyCameraState.h"
 #include "dk2_globals.h"
 #include "patches/logging.h"
@@ -84,6 +85,8 @@ void patch::unity_bridge::write_frame() {
     h.worldPos[2] = camera.arrx3__worldCameraPos.z;
     h.zoom = camera.curZoomLevel;
     h.direction = camera.direction;
+    h.mapWidth = inLevel && dk2::g_pCWorld ? dk2::g_pCWorld->cmap.width : 0;
+    h.mapHeight = inLevel && dk2::g_pCWorld ? dk2::g_pCWorld->cmap.height : 0;
 
     h.sequence.store(seq + 2, std::memory_order_release);  // even: done, publishes the writes above
 }

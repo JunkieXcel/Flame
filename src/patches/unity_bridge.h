@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 1;
+    constexpr uint32_t c_version = 2;
 
     enum Flags : uint32_t {
         F_CameraValid = 1 << 0,
@@ -42,6 +42,8 @@ namespace patch::unity_bridge {
         uint32_t zoom;  // CCamera::curZoomLevel
         uint16_t direction;  // CCamera::direction
         uint16_t pad;
+        int32_t mapWidth;  // in tiles, 0 outside a level
+        int32_t mapHeight;
     };
 #pragma pack(pop)
 
@@ -61,7 +63,9 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, zoom) == 96);
     static_assert(offsetof(Header, direction) == 100);
     static_assert(offsetof(Header, pad) == 102);
-    static_assert(sizeof(Header) == 104);
+    static_assert(offsetof(Header, mapWidth) == 104);
+    static_assert(offsetof(Header, mapHeight) == 108);
+    static_assert(sizeof(Header) == 112);
 
     // called once per frame from engine_drawScene. does nothing unless flame:unity-bridge is set
     void write_frame();
