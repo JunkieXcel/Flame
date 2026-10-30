@@ -44,6 +44,9 @@ bool patch::remember_window_location_and_size::window_proc(HWND hWnd, UINT Msg, 
         break;
     }
     case WM_MOVE: {
+        // a minimised window is parked at (-32000, -32000): don't remember that, or the window
+        // comes back there (off-screen) when the game resizes it after being restored
+        if (IsIconic(hWnd)) break;
         RECT winRect;
         GetWindowRect(hWnd, &winRect);
         window_pos = {winRect.left, winRect.top};
@@ -51,7 +54,8 @@ bool patch::remember_window_location_and_size::window_proc(HWND hWnd, UINT Msg, 
         break;
     }
     case WM_SIZE: {
-        if(!ignore_size) {
+        // nor the size of a minimised window (a taskbar stub)
+        if(!ignore_size && wParam != SIZE_MINIMIZED && !IsIconic(hWnd)) {
             RECT winRect;
             GetWindowRect(hWnd, &winRect);
             window_size = {winRect.right - winRect.left, winRect.bottom - winRect.top};
