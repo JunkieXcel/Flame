@@ -180,7 +180,10 @@ void __cdecl dk2::MyCameraState_575A00(MyCameraState *state, float a2) {
     CBridge *bridge = CPCEngineInterface_instance_start.pCBridge;
     int width = (int) MyWindow_instance.dwWidth;
     int height = (int) MyWindow_instance.dwHeight;
-    if (!*o_widescreenFov || bridge == nullptr || width <= 0 || height <= 0) {
+    // the front end (3D main menu, campaign map) runs at flame:menu-res, a 4:3 size: nothing to widen.
+    // adjusting it zoomed the campaign map in by height / refHeight (3x at 1440 / 480)
+    bool frontEnd = MyResources_instance.gameCfg.useFe3d != 0;
+    if (!*o_widescreenFov || frontEnd || bridge == nullptr || width <= 0 || height <= 0) {
         c_original_MyCameraState_575A00(state, a2);
         return;
     }
