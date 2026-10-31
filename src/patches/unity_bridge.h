@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 4;
+    constexpr uint32_t c_version = 5;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -72,6 +72,15 @@ namespace patch::unity_bridge {
         int32_t handFineX;  // ObjUnderHand::x_if12, assumed 1/4096 of a tile
         int32_t handFineY;  // ObjUnderHand::y_if12
         uint32_t handType;  // ObjUnderHand::type, meaning unknown
+        // the 3D view in screen pixels, from g_camState. MyCameraState_575A00 sets trg to the midpoint
+        // of leftRight and topBottom, so trg is the picture centre the projection uses
+        float viewLeftRight[2];  // g_camState.leftRight
+        float viewTopBottom[2];  // g_camState.topBottom
+        float viewCentre[2];  // g_camState.trg
+        int32_t renderLeft;  // g_sc_renderLeft: where the 3D view starts on the screen
+        int32_t renderTop;  // g_sc_renderTop
+        int32_t sceneWidth;  // g_sc_sceneWidth: the whole screen
+        int32_t sceneHeight;  // g_sc_sceneHeight
     };
 
     struct Tile {
@@ -111,7 +120,14 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, handFineX) == 140);
     static_assert(offsetof(Header, handFineY) == 144);
     static_assert(offsetof(Header, handType) == 148);
-    static_assert(sizeof(Header) == 152);
+    static_assert(offsetof(Header, viewLeftRight) == 152);
+    static_assert(offsetof(Header, viewTopBottom) == 160);
+    static_assert(offsetof(Header, viewCentre) == 168);
+    static_assert(offsetof(Header, renderLeft) == 176);
+    static_assert(offsetof(Header, renderTop) == 180);
+    static_assert(offsetof(Header, sceneWidth) == 184);
+    static_assert(offsetof(Header, sceneHeight) == 188);
+    static_assert(sizeof(Header) == 192);
     static_assert(sizeof(Tile) == 8);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_tilesOffset);

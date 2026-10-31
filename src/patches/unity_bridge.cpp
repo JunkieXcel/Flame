@@ -162,6 +162,16 @@ void patch::unity_bridge::write_frame() {
     h.focal = state.ww240;
     h.viewWidth = dk2::g_sc_renderWidth;
     h.viewHeight = dk2::g_sc_renderHeight;
+    h.viewLeftRight[0] = state.leftRight.x;
+    h.viewLeftRight[1] = state.leftRight.y;
+    h.viewTopBottom[0] = state.topBottom.x;
+    h.viewTopBottom[1] = state.topBottom.y;
+    h.viewCentre[0] = state.trg.x;
+    h.viewCentre[1] = state.trg.y;
+    h.renderLeft = dk2::g_sc_renderLeft;
+    h.renderTop = dk2::g_sc_renderTop;
+    h.sceneWidth = dk2::g_sc_sceneWidth;
+    h.sceneHeight = dk2::g_sc_sceneHeight;
     h.worldPos[0] = camera.arrx3__worldCameraPos.x;
     h.worldPos[1] = camera.arrx3__worldCameraPos.y;
     h.worldPos[2] = camera.arrx3__worldCameraPos.z;
