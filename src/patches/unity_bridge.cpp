@@ -217,6 +217,9 @@ void patch::unity_bridge::write_frame() {
     h.direction = camera.direction;
     writeTiles(h, inLevel);
     writeLights(h, inLevel);
+    h.ambient[0] = dk2::g_vec_760A98.x;
+    h.ambient[1] = dk2::g_vec_760A98.y;
+    h.ambient[2] = dk2::g_vec_760A98.z;
     dk2::CDefaultPlayerInterface *player = inLevel ? dk2::CGameComponent_instance.gameSession.pPlayer : nullptr;
     h.handValid = player ? 1 : 0;
     if (player) {

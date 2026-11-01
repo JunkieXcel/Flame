@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 7;
+    constexpr uint32_t c_version = 8;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -95,7 +95,9 @@ namespace patch::unity_bridge {
         uint32_t lightsCount;  // Light records at c_lightsOffset
         uint32_t lightsInList;  // lights in the game's list, may be more than lightsCount
         uint32_t lightsState;  // LightsState of this frame
-        uint32_t pad3;
+        // g_vec_760A98: the grey light every static mesh, sprite and height field starts from, 0..255 scale.
+        // sub_5747E0 sets it to Ambient Light option / 4096 (clamped 0..0.5) * 255; 0 until then
+        float ambient[3];
     };
 
     // one CLight. units and colour scale assumed, check in game
@@ -156,8 +158,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, lightsCount) == 192);
     static_assert(offsetof(Header, lightsInList) == 196);
     static_assert(offsetof(Header, lightsState) == 200);
-    static_assert(offsetof(Header, pad3) == 204);
-    static_assert(sizeof(Header) == 208);
+    static_assert(offsetof(Header, ambient) == 204);
+    static_assert(sizeof(Header) == 216);
     static_assert(sizeof(Tile) == 8);
     static_assert(offsetof(Light, colour) == 12);
     static_assert(offsetof(Light, baseColour) == 18);
