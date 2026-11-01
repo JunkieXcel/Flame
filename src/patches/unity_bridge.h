@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 6;
+    constexpr uint32_t c_version = 7;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -105,6 +105,8 @@ namespace patch::unity_bridge {
         int16_t baseColour[3];  // CLight +0x11F/121/123: the colour CLight::init was given
         uint32_t radius;  // CLight +0x117, CLight::init caps it at 0x2780
         uint32_t flags;  // CLight +0x134, 0x4 = pulsing (CLight's tick animates the colour); other bits unknown
+        uint8_t strength;  // CLight +0x145: the engine multiplies the light by strength / 128 (maybeAddLight)
+        uint8_t pad[3];
     };
 
     struct Tile {
@@ -161,7 +163,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Light, baseColour) == 18);
     static_assert(offsetof(Light, radius) == 24);
     static_assert(offsetof(Light, flags) == 28);
-    static_assert(sizeof(Light) == 32);
+    static_assert(offsetof(Light, strength) == 32);
+    static_assert(sizeof(Light) == 36);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_tilesOffset);
     static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);

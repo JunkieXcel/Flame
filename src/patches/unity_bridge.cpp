@@ -140,6 +140,7 @@ namespace {
             l.baseColour[2] = light->word_123;
             l.radius = (uint32_t) light->dword_117;
             l.flags = (uint32_t) light->dword_134;
+            l.strength = (uint8_t) light->eos;  // a char in the header, but the engine reads it unsigned
         }
         h.lightsCount = count;
         h.lightsInList = inList;
