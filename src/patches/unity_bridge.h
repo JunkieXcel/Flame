@@ -16,10 +16,11 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 8;
+    constexpr uint32_t c_version = 9;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
+    constexpr uint32_t c_terrainLightsOffset = 5120;  // TerrainLight[256]: the light each terrain type gives a tile
     constexpr uint32_t c_tilesOffset = 8192;  // Tile[mapHeight][mapWidth], row by row (y outer, x inner)
     constexpr int c_maxMapSide = 512;
     constexpr uint32_t c_lightsOffset = 3 * 1024 * 1024;  // Light[lightsCount]
@@ -98,6 +99,25 @@ namespace patch::unity_bridge {
         // g_vec_760A98: the grey light every static mesh, sprite and height field starts from, 0..255 scale.
         // sub_5747E0 sets it to Ambient Light option / 4096 (clamped 0..0.5) * 255; 0 until then
         float ambient[3];
+        // words at 6F29F0/2/4 (no name yet): sub_441CD0 uses them instead of the terrain's colour
+        // for tiles marked TL_OtherColour
+        int16_t tileLightOtherColour[3];
+        uint16_t pad3;
+    };
+
+    // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
+    // scene effect passed to maybeAddLight, never in CBridge::light_list). 0 = none
+    enum TileLight : uint8_t {
+        TL_TerrainMask = 0x7F,  // index of the terrain type whose TerrainLight it is, chosen by
+                                // MyMapElement::sub_452DC0 (e.g. 38 "Claim Scan" on some rock)
+        TL_OtherColour = 0x80,  // colour from Header::tileLightOtherColour instead of the terrain's
+    };
+
+    // MyTerrainDataObj light fields
+    struct TerrainLight {
+        int16_t colour[3];  // f1AF/f1B1/f1B3, 0..511 like the CLight colours
+        int16_t pad;
+        int32_t height;  // f1BF: the light's height above the tile, assumed 1/4096 of a tile
     };
 
     // one CLight. units and colour scale assumed, check in game
@@ -113,7 +133,7 @@ namespace patch::unity_bridge {
 
     struct Tile {
         uint8_t terrain;  // MyMapElement::arr6DA4A8_idx, the terrain type (index into g_MyTerrainDataObj_arr)
-        uint8_t pad;
+        uint8_t light;  // TileLight
         uint16_t owner;  // MyMapElement::_playerIdFFF & 0xFFF
         uint16_t room;  // MyMapElement::_roomIdFFF & 0xFFF, 0 = no room
         uint16_t pad2;
@@ -159,8 +179,12 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, lightsInList) == 196);
     static_assert(offsetof(Header, lightsState) == 200);
     static_assert(offsetof(Header, ambient) == 204);
-    static_assert(sizeof(Header) == 216);
+    static_assert(offsetof(Header, tileLightOtherColour) == 216);
+    static_assert(sizeof(Header) == 224);
     static_assert(sizeof(Tile) == 8);
+    static_assert(offsetof(Tile, light) == 1);
+    static_assert(offsetof(TerrainLight, height) == 8);
+    static_assert(sizeof(TerrainLight) == 12);
     static_assert(offsetof(Light, colour) == 12);
     static_assert(offsetof(Light, baseColour) == 18);
     static_assert(offsetof(Light, radius) == 24);
@@ -168,7 +192,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Light, strength) == 32);
     static_assert(sizeof(Light) == 36);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
-    static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_tilesOffset);
+    static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
+    static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);
     static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
     static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_mappingSize);
 

@@ -35,11 +35,35 @@ namespace {
     // what was last written to the block, to write the tiles again only when they change
     std::vector<patch::unity_bridge::Tile> g_writtenTiles;
     uint32_t g_writtenFlags[256] = {};
+    patch::unity_bridge::TerrainLight g_writtenTerrainLights[256] = {};
     int g_writtenWidth = 0;
     int g_writtenHeight = 0;
     // built every frame, then compared with the above
     std::vector<patch::unity_bridge::Tile> g_tiles;
     uint32_t g_flags[256] = {};
+    patch::unity_bridge::TerrainLight g_terrainLights[256] = {};
+
+    // the tile's steady light, decided the way CBridge::sub_441CD0 does
+    uint8_t tileLight(dk2::MyMapElement &e, int x, int y) {
+        using namespace patch::unity_bridge;
+        dk2::MyTerrainDataObj *terrain = nullptr;
+        if (!e.sub_452DC0(x, y, &terrain) || !terrain) return 0;
+        // sub_452DC0 may hand back another terrain than the tile's own (Claim Scan): find its index
+        int idx = e.arr6DA4A8_idx;
+        if (dk2::g_MyTerrainDataObj_arr[idx] != terrain) {
+            idx = -1;
+            for (int i = 0; i < 128; ++i) {
+                if (dk2::g_MyTerrainDataObj_arr[i] == terrain) { idx = i; break; }
+            }
+            if (idx < 0) return 0;
+        }
+        uint8_t light = (uint8_t) (idx & TL_TerrainMask);
+        // sub_441CD0: map element byte +9 bit 0x20 clear, +0xB bit 0x40 set, terrain f185 == 0
+        bool bit9 = (((uint16_t) e._playerIdFFF >> 8) & 0x20) != 0;
+        bool bitB = (e.flags_and_burnLevel & 0x40) != 0;
+        if (!bit9 && bitB && terrain->f185 == 0) light |= TL_OtherColour;
+        return light;
+    }
 
     // reads the map into g_tiles / g_flags. TS_Exported if the map looked whole and consistent
     patch::unity_bridge::TilesState readMap(bool inLevel, int &width, int &height) {
@@ -60,10 +84,10 @@ namespace {
 
         g_tiles.resize((size_t) w * h);
         for (int i = 0; i < w * h; ++i) {
-            const dk2::MyMapElement &e = elements[i];
+            dk2::MyMapElement &e = elements[i];
             Tile &t = g_tiles[i];
             t.terrain = e.arr6DA4A8_idx;
-            t.pad = 0;
+            t.light = tileLight(e, i % w, i / w);
             t.owner = (uint16_t) (e._playerIdFFF & 0xFFF);
             t.room = (uint16_t) (e._roomIdFFF & 0xFFF);
             t.pad2 = 0;
@@ -71,6 +95,14 @@ namespace {
         for (int i = 0; i < 256; ++i) {
             dk2::MyTerrainDataObj *terrain = dk2::g_MyTerrainDataObj_arr[i];
             g_flags[i] = terrain ? (uint32_t) terrain->_flags : 0;
+            TerrainLight &l = g_terrainLights[i];
+            l = {};
+            if (terrain) {
+                l.colour[0] = terrain->f1AF;
+                l.colour[1] = terrain->f1B1;
+                l.colour[2] = terrain->f1B3;
+                l.height = terrain->f1BF;
+            }
         }
         width = w;
         height = h;
@@ -91,6 +123,7 @@ namespace {
         size_t count = (size_t) width * height;
         bool same = width == g_writtenWidth && height == g_writtenHeight
                     && memcmp(g_flags, g_writtenFlags, sizeof(g_flags)) == 0
+                    && memcmp(g_terrainLights, g_writtenTerrainLights, sizeof(g_terrainLights)) == 0
                     && (count == 0 || memcmp(g_tiles.data(), g_writtenTiles.data(), count * sizeof(Tile)) == 0);
         if (same) return;
 
@@ -98,8 +131,10 @@ namespace {
         if (count) {
             memcpy(base + c_tilesOffset, g_tiles.data(), count * sizeof(Tile));
             memcpy(base + c_terrainFlagsOffset, g_flags, sizeof(g_flags));
+            memcpy(base + c_terrainLightsOffset, g_terrainLights, sizeof(g_terrainLights));
             g_writtenTiles.assign(g_tiles.begin(), g_tiles.begin() + (ptrdiff_t) count);
             memcpy(g_writtenFlags, g_flags, sizeof(g_flags));
+            memcpy(g_writtenTerrainLights, g_terrainLights, sizeof(g_terrainLights));
         } else {
             g_writtenTiles.clear();
         }
@@ -220,6 +255,7 @@ void patch::unity_bridge::write_frame() {
     h.ambient[0] = dk2::g_vec_760A98.x;
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;
+    for (int c = 0; c < 3; ++c) h.tileLightOtherColour[c] = ((const int16_t *) 0x6F29F0)[c];
     dk2::CDefaultPlayerInterface *player = inLevel ? dk2::CGameComponent_instance.gameSession.pPlayer : nullptr;
     h.handValid = player ? 1 : 0;
     if (player) {
