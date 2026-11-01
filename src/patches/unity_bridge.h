@@ -16,12 +16,15 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 5;
+    constexpr uint32_t c_version = 6;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
     constexpr uint32_t c_tilesOffset = 8192;  // Tile[mapHeight][mapWidth], row by row (y outer, x inner)
     constexpr int c_maxMapSide = 512;
+    constexpr uint32_t c_lightsOffset = 3 * 1024 * 1024;  // Light[lightsCount]
+    constexpr uint32_t c_maxLights = 1024;
+    constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
 
     enum Flags : uint32_t {
         F_CameraValid = 1 << 0,
@@ -39,6 +42,13 @@ namespace patch::unity_bridge {
         TS_WorldMismatch = 4,  // CMap::world doesn't point back to g_pCWorld
         TS_BadSize = 5,  // map width or height out of range
         TS_NoTiles = 6,  // CMap::mapElements is null
+    };
+
+    // why the lights of this frame were or were not exported
+    enum LightsState : uint32_t {
+        LS_Exported = 0,  // lightsCount lights of the list (all of them unless lightsInList > c_maxLights)
+        LS_NotInLevel = 1,  // no level: lightsCount = 0
+        LS_TooLong = 2,  // the list didn't end within c_maxListWalk steps (broken or looped): lightsCount = 0
     };
 
 #pragma pack(push, 1)
@@ -81,6 +91,20 @@ namespace patch::unity_bridge {
         int32_t renderTop;  // g_sc_renderTop
         int32_t sceneWidth;  // g_sc_sceneWidth: the whole screen
         int32_t sceneHeight;  // g_sc_sceneHeight
+        // the game's lights: CBridge::light_list, copied every frame (they flicker and pulse)
+        uint32_t lightsCount;  // Light records at c_lightsOffset
+        uint32_t lightsInList;  // lights in the game's list, may be more than lightsCount
+        uint32_t lightsState;  // LightsState of this frame
+        uint32_t pad3;
+    };
+
+    // one CLight. units and colour scale assumed, check in game
+    struct Light {
+        int32_t pos[3];  // CBridgeThing::fD2_pos, assumed 1/4096 of a tile like the camera
+        int16_t colour[3];  // CLight +0x111/113/115: current colour, after flicker or pulse
+        int16_t baseColour[3];  // CLight +0x11F/121/123: the colour CLight::init was given
+        uint32_t radius;  // CLight +0x117, CLight::init caps it at 0x2780
+        uint32_t flags;  // CLight +0x134, 0x4 = pulsing (CLight's tick animates the colour); other bits unknown
     };
 
     struct Tile {
@@ -127,11 +151,21 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, renderTop) == 180);
     static_assert(offsetof(Header, sceneWidth) == 184);
     static_assert(offsetof(Header, sceneHeight) == 188);
-    static_assert(sizeof(Header) == 192);
+    static_assert(offsetof(Header, lightsCount) == 192);
+    static_assert(offsetof(Header, lightsInList) == 196);
+    static_assert(offsetof(Header, lightsState) == 200);
+    static_assert(offsetof(Header, pad3) == 204);
+    static_assert(sizeof(Header) == 208);
     static_assert(sizeof(Tile) == 8);
+    static_assert(offsetof(Light, colour) == 12);
+    static_assert(offsetof(Light, baseColour) == 18);
+    static_assert(offsetof(Light, radius) == 24);
+    static_assert(offsetof(Light, flags) == 28);
+    static_assert(sizeof(Light) == 32);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_tilesOffset);
-    static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_mappingSize);
+    static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
+    static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_mappingSize);
 
     // called once per frame from engine_drawScene. does nothing unless flame:unity-bridge is set
     void write_frame();

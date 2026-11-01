@@ -10,6 +10,7 @@
 #include "dk2/CBridge.h"
 #include "dk2/CCamera.h"
 #include "dk2/CDefaultPlayerInterface.h"
+#include "dk2/CLight.h"
 #include "dk2/CWorld.h"
 #include "dk2/world/map/MyMapElement.h"
 #include "dk2/entities/data/MyTerrainDataObj.h"
@@ -109,6 +110,42 @@ namespace {
         h.tilesVersion++;
     }
 
+    // copies the game's light list. called between the odd and even sequence, like the camera
+    void writeLights(patch::unity_bridge::Header &h, bool inLevel) {
+        using namespace patch::unity_bridge;
+        h.lightsCount = 0;
+        h.lightsInList = 0;
+        if (!inLevel) {
+            h.lightsState = LS_NotInLevel;
+            return;
+        }
+        auto *out = (Light *) ((uint8_t *) &h + c_lightsOffset);
+        uint32_t count = 0;
+        uint32_t inList = 0;
+        for (dk2::CLight *light = dk2::CBridge_instance.light_list; light; light = light->f13c_next) {
+            if (++inList > c_maxListWalk) {
+                h.lightsState = LS_TooLong;
+                return;
+            }
+            if (count >= c_maxLights) continue;  // keep counting the rest
+            Light &l = out[count++];
+            l.pos[0] = light->fD2_pos.x;
+            l.pos[1] = light->fD2_pos.y;
+            l.pos[2] = light->fD2_pos.z;
+            l.colour[0] = light->word_111;
+            l.colour[1] = light->word_113;
+            l.colour[2] = light->word_115;
+            l.baseColour[0] = light->word_11f;
+            l.baseColour[1] = light->word_121;
+            l.baseColour[2] = light->word_123;
+            l.radius = (uint32_t) light->dword_117;
+            l.flags = (uint32_t) light->dword_134;
+        }
+        h.lightsCount = count;
+        h.lightsInList = inList;
+        h.lightsState = LS_Exported;
+    }
+
     bool open() {
         using namespace patch::unity_bridge;
         g_mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, c_mappingSize, c_mappingName);
@@ -178,6 +215,7 @@ void patch::unity_bridge::write_frame() {
     h.zoom = camera.curZoomLevel;
     h.direction = camera.direction;
     writeTiles(h, inLevel);
+    writeLights(h, inLevel);
     dk2::CDefaultPlayerInterface *player = inLevel ? dk2::CGameComponent_instance.gameSession.pPlayer : nullptr;
     h.handValid = player ? 1 : 0;
     if (player) {
