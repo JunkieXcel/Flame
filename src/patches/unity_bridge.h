@@ -14,9 +14,9 @@ namespace patch::unity_bridge {
     // named shared memory read by the Unity project (D:\Dev\DK2-Unity, FlameBridge.cs).
     // the layout is pinned on both sides: change it together with FlameBridge.cs and bump c_version
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
-    constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
+    constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 10;
+    constexpr uint32_t c_version = 11;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -26,6 +26,8 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_lightsOffset = 3 * 1024 * 1024;  // Light[lightsCount]
     constexpr uint32_t c_maxLights = 1024;
     constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
+    constexpr uint32_t c_bendOffset = 4 * 1024 * 1024;  // TileBend[mapHeight][mapWidth], row by row like the tiles
+    constexpr uint32_t c_maxBendTiles = 32768;  // a bigger map gets no TileBend table (BS_MapTooBig)
 
     enum Flags : uint32_t {
         F_CameraValid = 1 << 0,
@@ -50,6 +52,14 @@ namespace patch::unity_bridge {
         LS_Exported = 0,  // lightsCount lights of the list (all of them unless lightsInList > c_maxLights)
         LS_NotInLevel = 1,  // no level: lightsCount = 0
         LS_TooLong = 2,  // the list didn't end within c_maxListWalk steps (broken or looped): lightsCount = 0
+    };
+
+    // why the TileBend table of this frame is what it is
+    enum BendState : uint32_t {
+        BS_Exported = 0,  // the table is the current map's (tiles the engine hasn't built yet are not known)
+        BS_NotInLevel = 1,  // no level: bendTiles = 0
+        BS_NoMap = 2,  // no tiles exported yet: bendTiles = 0
+        BS_MapTooBig = 3,  // mapWidth * mapHeight > c_maxBendTiles: bendTiles = 0
     };
 
 #pragma pack(push, 1)
@@ -103,6 +113,11 @@ namespace patch::unity_bridge {
         // for tiles marked TL_OtherColour
         int16_t tileLightOtherColour[3];
         uint16_t pad3;
+        // the engine's bent tile shapes: TileBend records at c_bendOffset
+        uint32_t bendVersion;  // +1 whenever the TileBend table changes
+        uint32_t bendTiles;  // tiles whose TileBend is known
+        uint32_t bendState;  // BendState of this frame
+        uint32_t bendClamped;  // moves of this frame that didn't fit an int16 and were clamped (expected 0)
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -137,6 +152,19 @@ namespace patch::unity_bridge {
     enum WallPanels : uint8_t {
         WP_NorthSouth = 0x1,  // the N and S walls: alignX >= 0 and (x + alignX) even
         WP_EastWest = 0x2,    // the E and W walls: alignY >= 0 and (y + alignY) odd
+    };
+
+    // How the 3D engine bends a tile (read 2026-11-02). Every static mesh vertex goes through
+    // Obj58EF60::sub_58F030 (Obj57AD20::constructor): a blend of the 8 nearest control points of a grid every half
+    // tile, at 5 heights (engine z -2.5, -2, -1.5, -1, -0.5; up is -z). Each tile owns 2 x 2 columns of 5 points at
+    // engine (x + i/2, y + j/2, -2.5 + k/2), i, j = 0..1, k = 0..4, which CPCEngineInterface::sub_5A3590 moves a little
+    // (from the map position and the neighbours) when the engine first builds the tile. They live in the engine's tile
+    // cache (g_NewObj571B3B_hashTable, NewObj571B3B::ptr3C, 20 Vec3f, point index (2i + j) * 5 + k).
+    // TileBend holds each point's move away from that regular place, in 1/4096 of a tile
+    struct TileBend {
+        int16_t move[20][3];  // [(2i + j) * 5 + k][engine x, y, z]
+        uint8_t known;  // 1 once the engine has built the tile's points (kept until the level ends or the map size changes)
+        uint8_t pad[7];
     };
 
     struct Tile {
@@ -189,7 +217,13 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, lightsState) == 200);
     static_assert(offsetof(Header, ambient) == 204);
     static_assert(offsetof(Header, tileLightOtherColour) == 216);
-    static_assert(sizeof(Header) == 224);
+    static_assert(offsetof(Header, bendVersion) == 224);
+    static_assert(offsetof(Header, bendTiles) == 228);
+    static_assert(offsetof(Header, bendState) == 232);
+    static_assert(offsetof(Header, bendClamped) == 236);
+    static_assert(sizeof(Header) == 240);
+    static_assert(sizeof(TileBend) == 128);
+    static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);
     static_assert(offsetof(Tile, light) == 1);
     static_assert(offsetof(Tile, wallPanels) == 6);
@@ -205,7 +239,8 @@ namespace patch::unity_bridge {
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
     static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);
     static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
-    static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_mappingSize);
+    static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_bendOffset);
+    static_assert(c_bendOffset + c_maxBendTiles * sizeof(TileBend) <= c_mappingSize);
 
     // called once per frame from engine_drawScene. does nothing unless flame:unity-bridge is set
     void write_frame();

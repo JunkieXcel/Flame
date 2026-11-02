@@ -4,6 +4,7 @@
 
 #include "unity_bridge.h"
 #include <Windows.h>
+#include <cmath>
 #include <cstring>
 #include <new>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "dk2/CDefaultPlayerInterface.h"
 #include "dk2/CLight.h"
 #include "dk2/CWorld.h"
+#include "dk2/NewObj571B3B.h"
 #include "dk2/entities/CRoom.h"
 #include "dk2/world/map/MyMapElement.h"
 #include "dk2/entities/data/MyTerrainDataObj.h"
@@ -43,6 +45,14 @@ namespace {
     std::vector<patch::unity_bridge::Tile> g_tiles;
     uint32_t g_flags[256] = {};
     patch::unity_bridge::TerrainLight g_terrainLights[256] = {};
+
+    // the bent tile shapes, kept between frames: the engine's cache only holds the tiles drawn in the last frame
+    // (NewObj571B3B_sub_576010 frees the others every frame), so a tile keeps its last known points here until the
+    // engine builds them again. Reset when the level ends or the map size changes
+    std::vector<patch::unity_bridge::TileBend> g_bend;
+    int g_bendWidth = 0;
+    int g_bendHeight = 0;
+    bool g_bendDirty = false;  // g_bend differs from the block
 
     // the tile's steady light, decided the way CBridge::sub_441CD0 does
     uint8_t tileLight(dk2::MyMapElement &e, int x, int y) {
@@ -161,6 +171,92 @@ namespace {
         h.tilesVersion++;
     }
 
+    // the moves of one tile's 20 control points away from their regular places. false if the engine hasn't built them
+    bool readBend(dk2::NewObj571B3B &o, int x, int y, patch::unity_bridge::TileBend &out, uint32_t &clamped) {
+        if (!o.ptr3C) return false;
+        auto *p = (const float *) o.ptr3C;  // Vec3f[20]
+        out = {};
+        out.known = 1;
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                for (int k = 0; k < 5; ++k) {
+                    int point = (2 * i + j) * 5 + k;
+                    float regular[3] = {(float) x + 0.5f * (float) i, (float) y + 0.5f * (float) j, -2.5f + 0.5f * (float) k};
+                    for (int c = 0; c < 3; ++c) {
+                        float move = std::round((p[point * 3 + c] - regular[c]) * 4096.0f);
+                        if (!(move >= -32768.0f && move <= 32767.0f)) {  // also catches NaN
+                            clamped++;
+                            move = move > 0 ? 32767.0f : -32768.0f;
+                        }
+                        out.move[point][c] = (int16_t) move;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    // copies the bent tile shapes from the engine's tile cache. called between the odd and even sequence, after
+    // writeTiles (it uses the exported map size)
+    void writeBend(patch::unity_bridge::Header &h, bool inLevel) {
+        using namespace patch::unity_bridge;
+        h.bendClamped = 0;
+        int w = g_writtenWidth;
+        int hh = g_writtenHeight;
+        BendState state = !inLevel ? BS_NotInLevel
+                        : (w <= 0 || hh <= 0) ? BS_NoMap
+                        : (size_t) w * hh > c_maxBendTiles ? BS_MapTooBig
+                        : BS_Exported;
+        h.bendState = state;
+        if (state != BS_Exported) {
+            if (!g_bend.empty() || h.bendTiles != 0) {
+                g_bend.clear();
+                g_bendWidth = g_bendHeight = 0;
+                h.bendTiles = 0;
+                h.bendVersion++;
+            }
+            return;
+        }
+        if (w != g_bendWidth || hh != g_bendHeight || g_bend.empty()) {
+            g_bend.assign((size_t) w * hh, TileBend{});
+            g_bendWidth = w;
+            g_bendHeight = hh;
+            g_bendDirty = true;
+        }
+        // the cache: 64 x 64 chains, [x & 63][y & 63] (NewObj571B3B_add), linked by +0x14. Every entry in it is
+        // live: the engine unlinks an entry before freeing it (NewObj571B3B_sub_576010, NewObj571B3B_clear), and
+        // sets ptr3C to 0 when it frees the points (sub_571DA0, freeSmthInLoc/Area). NewObj571B3B::f4 is not a
+        // level: it is g_ddSceneSessionId, which onDdSceneInitialized adds 1 to every drawn frame
+        uint32_t clamped = 0;
+        uint32_t steps = 0;
+        TileBend bend;
+        // read by address: the header's [64][64] declaration doesn't link (the export is typed differently)
+        auto *table = (dk2::NewObj571B3B *const *) 0x760B90;  // g_NewObj571B3B_hashTable
+        for (int slot = 0; slot < 64 * 64; ++slot) {
+            for (dk2::NewObj571B3B *o = table[slot]; o; o = o->prev) {
+                if (++steps > c_maxListWalk) goto walked;  // a broken chain: keep what we have
+                int x = o->a2;
+                int y = o->a3;
+                if (x < 0 || y < 0 || x >= w || y >= hh) continue;
+                if (!readBend(*o, x, y, bend, clamped)) continue;
+                TileBend &dst = g_bend[(size_t) y * w + x];
+                if (memcmp(&dst, &bend, sizeof(TileBend)) != 0) {
+                    dst = bend;
+                    g_bendDirty = true;
+                }
+            }
+        }
+        walked:
+        h.bendClamped = clamped;
+        if (!g_bendDirty) return;
+        memcpy((uint8_t *) &h + c_bendOffset, g_bend.data(), g_bend.size() * sizeof(TileBend));
+        uint32_t known = 0;
+        for (const TileBend &b : g_bend) known += b.known;
+        h.bendTiles = known;
+        h.bendVersion++;
+        g_bendDirty = false;
+    }
+
     // copies the game's light list. called between the odd and even sequence, like the camera
     void writeLights(patch::unity_bridge::Header &h, bool inLevel) {
         using namespace patch::unity_bridge;
@@ -268,6 +364,7 @@ void patch::unity_bridge::write_frame() {
     h.direction = camera.direction;
     writeTiles(h, inLevel);
     writeLights(h, inLevel);
+    writeBend(h, inLevel);
     h.ambient[0] = dk2::g_vec_760A98.x;
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;
