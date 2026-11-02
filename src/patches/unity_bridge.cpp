@@ -12,6 +12,7 @@
 #include "dk2/CDefaultPlayerInterface.h"
 #include "dk2/CLight.h"
 #include "dk2/CWorld.h"
+#include "dk2/entities/CRoom.h"
 #include "dk2/world/map/MyMapElement.h"
 #include "dk2/entities/data/MyTerrainDataObj.h"
 #include "dk2/utils/MyCameraState.h"
@@ -65,6 +66,20 @@ namespace {
         return light;
     }
 
+    // which full wall panels of a room tile use the second panel piece, the way CBridge::sub_444F10 picks them
+    uint8_t wallPanels(dk2::MyMapElement &e, int x, int y) {
+        using namespace patch::unity_bridge;
+        if ((e._roomIdFFF & 0xFFF) == 0) return 0;
+        dk2::CRoom *room = e.getRoom();  // a lookup in the game's object table, may be null
+        if (!room) return 0;
+        uint8_t panels = 0;
+        int alignX = room->roomWallAlignmentMapX;
+        int alignY = room->roomWallAlignmentMapY;
+        if (alignX >= 0 && ((x + alignX) & 1) == 0) panels |= WP_NorthSouth;
+        if (alignY >= 0 && ((y + alignY) & 1) == 1) panels |= WP_EastWest;
+        return panels;
+    }
+
     // reads the map into g_tiles / g_flags. TS_Exported if the map looked whole and consistent
     patch::unity_bridge::TilesState readMap(bool inLevel, int &width, int &height) {
         using namespace patch::unity_bridge;
@@ -90,6 +105,7 @@ namespace {
             t.light = tileLight(e, i % w, i / w);
             t.owner = (uint16_t) (e._playerIdFFF & 0xFFF);
             t.room = (uint16_t) (e._roomIdFFF & 0xFFF);
+            t.wallPanels = wallPanels(e, i % w, i / w);
             t.pad2 = 0;
         }
         for (int i = 0; i < 256; ++i) {

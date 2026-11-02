@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 4 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 9;
+    constexpr uint32_t c_version = 10;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -131,12 +131,21 @@ namespace patch::unity_bridge {
         uint8_t pad[3];
     };
 
+    // Tile::wallPanels: which of a room tile's full-width wall panels use the room's second panel piece
+    // (fC1[8], e.g. the Hatchery's decorated "Hatchery1") instead of the first (fC1[7], plain plaster).
+    // CBridge::sub_444F10 decides it from CRoom::roomWallAlignmentMapX/Y (+0x92/+0x96, -1 = never):
+    enum WallPanels : uint8_t {
+        WP_NorthSouth = 0x1,  // the N and S walls: alignX >= 0 and (x + alignX) even
+        WP_EastWest = 0x2,    // the E and W walls: alignY >= 0 and (y + alignY) odd
+    };
+
     struct Tile {
         uint8_t terrain;  // MyMapElement::arr6DA4A8_idx, the terrain type (index into g_MyTerrainDataObj_arr)
         uint8_t light;  // TileLight
         uint16_t owner;  // MyMapElement::_playerIdFFF & 0xFFF
         uint16_t room;  // MyMapElement::_roomIdFFF & 0xFFF, 0 = no room
-        uint16_t pad2;
+        uint8_t wallPanels;  // WallPanels, 0 for tiles that aren't in a room
+        uint8_t pad2;
     };
 #pragma pack(pop)
 
@@ -183,6 +192,7 @@ namespace patch::unity_bridge {
     static_assert(sizeof(Header) == 224);
     static_assert(sizeof(Tile) == 8);
     static_assert(offsetof(Tile, light) == 1);
+    static_assert(offsetof(Tile, wallPanels) == 6);
     static_assert(offsetof(TerrainLight, height) == 8);
     static_assert(sizeof(TerrainLight) == 12);
     static_assert(offsetof(Light, colour) == 12);
