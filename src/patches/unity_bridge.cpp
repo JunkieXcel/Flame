@@ -14,6 +14,7 @@
 #include "dk2/CLight.h"
 #include "dk2/CWorld.h"
 #include "dk2/NewObj571B3B.h"
+#include "dk2/entities/CObject.h"
 #include "dk2/entities/CRoom.h"
 #include "dk2/world/map/MyMapElement.h"
 #include "dk2/entities/data/MyTerrainDataObj.h"
@@ -294,6 +295,53 @@ namespace {
         h.lightsState = LS_Exported;
     }
 
+    // copies every object in the game's thing table. called between the odd and even sequence, like the camera
+    void writeObjects(patch::unity_bridge::Header &h, bool inLevel) {
+        using namespace patch::unity_bridge;
+        h.objectsCount = 0;
+        h.objectsTyped = 0;
+        h.objectsMismatch = 0;
+        if (!inLevel) {
+            h.objectsState = OS_NotInLevel;
+            return;
+        }
+        auto *out = (Object *) ((uint8_t *) &h + c_objectsOffset);
+        uint32_t count = 0;
+        uint32_t typed = 0;
+        uint32_t mismatch = 0;
+        // the table also holds players, rooms and other tags that aren't things: only CObjects are read,
+        // recognised by their vtable (nothing derives from CObject). Slot 0 is never used
+        for (int tag = 1; tag < 4096; ++tag) {
+            if (!dk2::sceneObjectsPresent[tag]) continue;
+            dk2::CTag *t = dk2::sceneObjects[tag];
+            if (!t) continue;
+            if (t->getVtbl() != dk2::CObject::vftable) continue;
+            auto *o = (dk2::CObject *) t;
+            if (o->fE_type == 2) typed++;
+            else mismatch++;
+            if (count >= c_maxObjects) continue;
+            Object &r = out[count++];
+            r.pos[0] = o->f16_pos.x;
+            r.pos[1] = o->f16_pos.y;
+            r.pos[2] = o->f16_pos.z;
+            r.tagId = o->f0_tagId;
+            r.owner = o->f24_playerId;
+            r.direction = o->fF0_direction;
+            r.typeId = o->typeId;
+            r.animationId = o->renderInfo.animationId;
+            r.flags = o->flags;
+            r.stateId = o->stateId;
+            r.currentFrame = o->renderInfo.currentFrame;
+            r.mapWhoType = o->f12_mapWhoType;
+            r.floorHeight = o->f22_floorHeight;
+            r.pad = 0;
+        }
+        h.objectsCount = count;
+        h.objectsTyped = typed;
+        h.objectsMismatch = mismatch;
+        h.objectsState = OS_Exported;
+    }
+
     bool open() {
         using namespace patch::unity_bridge;
         g_mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, c_mappingSize, c_mappingName);
@@ -365,6 +413,7 @@ void patch::unity_bridge::write_frame() {
     writeTiles(h, inLevel);
     writeLights(h, inLevel);
     writeBend(h, inLevel);
+    writeObjects(h, inLevel);
     h.ambient[0] = dk2::g_vec_760A98.x;
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;

@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 11;
+    constexpr uint32_t c_version = 12;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -26,6 +26,8 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_lightsOffset = 3 * 1024 * 1024;  // Light[lightsCount]
     constexpr uint32_t c_maxLights = 1024;
     constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
+    constexpr uint32_t c_objectsOffset = 3 * 1024 * 1024 + 512 * 1024;  // Object[objectsCount]
+    constexpr uint32_t c_maxObjects = 4096;  // the size of the game's thing table, so every object fits
     constexpr uint32_t c_bendOffset = 4 * 1024 * 1024;  // TileBend[mapHeight][mapWidth], row by row like the tiles
     constexpr uint32_t c_maxBendTiles = 32768;  // a bigger map gets no TileBend table (BS_MapTooBig)
 
@@ -52,6 +54,12 @@ namespace patch::unity_bridge {
         LS_Exported = 0,  // lightsCount lights of the list (all of them unless lightsInList > c_maxLights)
         LS_NotInLevel = 1,  // no level: lightsCount = 0
         LS_TooLong = 2,  // the list didn't end within c_maxListWalk steps (broken or looped): lightsCount = 0
+    };
+
+    // why the objects of this frame were or were not exported
+    enum ObjectsState : uint32_t {
+        OS_Exported = 0,  // objectsCount objects: every CObject in the game's thing table
+        OS_NotInLevel = 1,  // no level: objectsCount = 0
     };
 
     // why the TileBend table of this frame is what it is
@@ -118,6 +126,11 @@ namespace patch::unity_bridge {
         uint32_t bendTiles;  // tiles whose TileBend is known
         uint32_t bendState;  // BendState of this frame
         uint32_t bendClamped;  // moves of this frame that didn't fit an int16 and were clamped (expected 0)
+        // the game's objects (beds, chickens, gold ...): Object records at c_objectsOffset, copied every frame
+        uint32_t objectsCount;  // Object records: the things in sceneObjects whose class is CObject (by vtable)
+        uint32_t objectsTyped;  // things whose CThing::fE_type is 2 (expected = objectsCount: a check that 2 = object)
+        uint32_t objectsState;  // ObjectsState of this frame
+        uint32_t objectsMismatch;  // CObjects whose fE_type is not 2 (expected 0)
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -165,6 +178,22 @@ namespace patch::unity_bridge {
         int16_t move[20][3];  // [(2i + j) * 5 + k][engine x, y, z]
         uint8_t known;  // 1 once the engine has built the tile's points (kept until the level ends or the map size changes)
         uint8_t pad[7];
+    };
+
+    // one CObject from the game's thing table (sceneObjects / sceneObjectsPresent). Read 2026-11-03, units assumed
+    struct Object {
+        int32_t pos[3];  // CThing::f16_pos, assumed 1/4096 of a tile with up = +z like a CLight's position
+        uint16_t tagId;  // CTag::f0_tagId, its slot in the thing table
+        uint16_t owner;  // CThing::f24_playerId
+        uint16_t direction;  // CPhysicalThing::fF0_direction, assumed 0..2047 for a full turn (unchecked)
+        uint8_t typeId;  // CObject::typeId: the object type (Objects.kwd), names checked later
+        uint8_t animationId;  // CRenderInfo::animationId
+        uint32_t flags;  // CObject::flags, meaning unknown
+        uint32_t stateId;  // CObject::stateId
+        int32_t currentFrame;  // CRenderInfo::currentFrame
+        uint32_t mapWhoType;  // CThing::f12_mapWhoType, meaning unknown (maybe: on the map / in a hand)
+        int16_t floorHeight;  // CThing::f22_floorHeight
+        uint16_t pad;
     };
 
     struct Tile {
@@ -221,7 +250,22 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, bendTiles) == 228);
     static_assert(offsetof(Header, bendState) == 232);
     static_assert(offsetof(Header, bendClamped) == 236);
-    static_assert(sizeof(Header) == 240);
+    static_assert(offsetof(Header, objectsCount) == 240);
+    static_assert(offsetof(Header, objectsTyped) == 244);
+    static_assert(offsetof(Header, objectsState) == 248);
+    static_assert(offsetof(Header, objectsMismatch) == 252);
+    static_assert(sizeof(Header) == 256);
+    static_assert(offsetof(Object, tagId) == 12);
+    static_assert(offsetof(Object, owner) == 14);
+    static_assert(offsetof(Object, direction) == 16);
+    static_assert(offsetof(Object, typeId) == 18);
+    static_assert(offsetof(Object, animationId) == 19);
+    static_assert(offsetof(Object, flags) == 20);
+    static_assert(offsetof(Object, stateId) == 24);
+    static_assert(offsetof(Object, currentFrame) == 28);
+    static_assert(offsetof(Object, mapWhoType) == 32);
+    static_assert(offsetof(Object, floorHeight) == 36);
+    static_assert(sizeof(Object) == 40);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);
@@ -239,7 +283,8 @@ namespace patch::unity_bridge {
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
     static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);
     static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
-    static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_bendOffset);
+    static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_objectsOffset);
+    static_assert(c_objectsOffset + c_maxObjects * sizeof(Object) <= c_bendOffset);
     static_assert(c_bendOffset + c_maxBendTiles * sizeof(TileBend) <= c_mappingSize);
 
     // called once per frame from engine_drawScene. does nothing unless flame:unity-bridge is set
