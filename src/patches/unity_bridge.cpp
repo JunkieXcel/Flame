@@ -259,6 +259,9 @@ namespace {
     }
 
     // copies the game's light list. called between the odd and even sequence, like the camera
+    // the "moving" field the engine checks at +0xE4 (CBridge::createMeshes 43CF7E, CBridge::fun_43C310 43C6DA)
+    static_assert(offsetof(dk2::CBridgeThing, field_E0) == 0xE4);
+
     void writeLights(patch::unity_bridge::Header &h, bool inLevel) {
         using namespace patch::unity_bridge;
         h.lightsCount = 0;
@@ -289,6 +292,7 @@ namespace {
             l.radius = (uint32_t) light->dword_117;
             l.flags = (uint32_t) light->dword_134;
             l.strength = (uint8_t) light->eos;  // a char in the header, but the engine reads it unsigned
+            l.moving = light->field_E0 != 0 ? 1 : 0;  // the field at +0xE4 (the header's names are 4 lower)
         }
         h.lightsCount = count;
         h.lightsInList = inList;

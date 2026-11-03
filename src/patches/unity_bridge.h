@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 12;
+    constexpr uint32_t c_version = 13;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -156,7 +156,11 @@ namespace patch::unity_bridge {
         uint32_t radius;  // CLight +0x117, CLight::init caps it at 0x2780
         uint32_t flags;  // CLight +0x134, 0x4 = pulsing (CLight's tick animates the colour); other bits unknown
         uint8_t strength;  // CLight +0x145: the engine multiplies the light by strength / 128 (maybeAddLight)
-        uint8_t pad[3];
+        // v13: 1 = a moving light: CBridgeThing +0xE4 (header name field_E0) != 0, so CBridge::createMeshes gives it to
+        // the engine as a moving light (createMesh_light); 0 = steady (CBridge::fun_43C310). Objects light moving and
+        // flickering lights per vertex by facing, steady ones evenly (CEngineDynamicMesh, read 2026-11-03)
+        uint8_t moving;
+        uint8_t pad[2];
     };
 
     // Tile::wallPanels: which of a room tile's full-width wall panels use the room's second panel piece
@@ -278,6 +282,7 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Light, radius) == 24);
     static_assert(offsetof(Light, flags) == 28);
     static_assert(offsetof(Light, strength) == 32);
+    static_assert(offsetof(Light, moving) == 33);
     static_assert(sizeof(Light) == 36);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
