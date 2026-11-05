@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 14;
+    constexpr uint32_t c_version = 15;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -166,7 +166,24 @@ namespace patch::unity_bridge {
         // the engine as a moving light (createMesh_light); 0 = steady (CBridge::fun_43C310). Objects light moving and
         // flickering lights per vertex by facing, steady ones evenly (CEngineDynamicMesh, read 2026-11-03)
         uint8_t moving;
-        uint8_t pad[2];
+        // v15: the light's own mesh, e.g. a wall torch's holder (read 2026-11-05: CBridge::fun_439B90 makes a torch as
+        // a CLight with flags 0x4052 and gives it the room's or CBridge's "Torch1" mesh). LightMesh bits
+        uint8_t meshFlags;
+        uint8_t pad;
+        // v15: CBridgeThing +0xE2 (header name fDE_angle), 0..2047 = a full turn. torches: 0, 512, 1024 or 1536 by the
+        // wall side (fun_439B90: ((side - 1) & 3) * 512, sides in g_deltaLocs order -y, +x, +y, -x)
+        uint16_t direction;
+        // v15: where the mesh sits from the light, 1/4096 tile, up = +z like pos: render info +0x51/53/55 (CLight
+        // +0x77/79/7B). torches: 1/8 tile toward the wall (table 6D3980), so the holder sits on the wall face
+        int16_t meshOffset[3];
+        uint8_t pad2[4];
+    };
+
+    enum LightMesh : uint8_t {
+        LM_HasMesh = 1 << 0,  // render info pWorldEntry is set (rooms without a torch holder, e.g. the Temple, have none)
+        LM_Flame = 1 << 1,  // the mesh's world entry flag 1 (+0xB): CBridge::createMeshes draws the shared KTorch flame
+                            // on a steady light with it, 0x4B0 above the light and 1/8 tile toward the wall
+        LM_Drawn = 1 << 2,  // render info _flags2 bit 0 (CLight +0xD5); fun_439B90 clears it when a room has no holder
     };
 
     // Tile::wallPanels: which of a room tile's full-width wall panels use the room's second panel piece
@@ -293,7 +310,10 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Light, flags) == 28);
     static_assert(offsetof(Light, strength) == 32);
     static_assert(offsetof(Light, moving) == 33);
-    static_assert(sizeof(Light) == 36);
+    static_assert(offsetof(Light, meshFlags) == 34);
+    static_assert(offsetof(Light, direction) == 36);
+    static_assert(offsetof(Light, meshOffset) == 38);
+    static_assert(sizeof(Light) == 48);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
     static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);

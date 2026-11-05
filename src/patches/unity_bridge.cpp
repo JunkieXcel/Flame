@@ -14,6 +14,7 @@
 #include "dk2/CLight.h"
 #include "dk2/CWorld.h"
 #include "dk2/NewObj571B3B.h"
+#include "dk2/engine/CWorldEntry.h"
 #include "dk2/entities/CObject.h"
 #include "dk2/entities/CRoom.h"
 #include "dk2/world/map/MyMapElement.h"
@@ -293,6 +294,18 @@ namespace {
             l.flags = (uint32_t) light->dword_134;
             l.strength = (uint8_t) light->eos;  // a char in the header, but the engine reads it unsigned
             l.moving = light->field_E0 != 0 ? 1 : 0;  // the field at +0xE4 (the header's names are 4 lower)
+            const dk2::CRenderInfo &ri = light->renderInfo;
+            uint8_t meshFlags = 0;
+            if (ri.pWorldEntry) {
+                meshFlags |= LM_HasMesh;
+                if (ri.pWorldEntry->u.weB_flags & 1) meshFlags |= LM_Flame;
+            }
+            if (ri._flags2 & 1) meshFlags |= LM_Drawn;
+            l.meshFlags = meshFlags;
+            l.direction = light->fDE_angle;
+            l.meshOffset[0] = ri.f51;
+            l.meshOffset[1] = ri.f53;
+            l.meshOffset[2] = ri.f55;
         }
         h.lightsCount = count;
         h.lightsInList = inList;
