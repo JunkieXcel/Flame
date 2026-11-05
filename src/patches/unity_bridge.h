@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 13;
+    constexpr uint32_t c_version = 14;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -131,6 +131,12 @@ namespace patch::unity_bridge {
         uint32_t objectsTyped;  // things whose CThing::fE_type is 2 (expected = objectsCount: a check that 2 = object)
         uint32_t objectsState;  // ObjectsState of this frame
         uint32_t objectsMismatch;  // CObjects whose fE_type is not 2 (expected 0)
+        // v14: how much gold one room tile holds, from the level's variables (set by CWorld::sub_51CD90). Treasury
+        // gold changes its mesh by goldHeld in thirds of this (CRoom::fun_4F4440, read 2026-11-04): < 1/3 art 5
+        // (Gold Urn1), < 2/3 art 6 (Gold Urn2), else the main mesh (Gold Chest)
+        int32_t goldPerTile;  // global 6F25A4, variable 24 (GlobalVariables.kwd: 3000)
+        int32_t goldPerTileHeart;  // global 6F25A8, variable 178 (1000): used instead when CRoom +0x18 == 5
+                                   // (probably the Dungeon Heart) and CRoom +0x9A bit 0 is clear
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -198,6 +204,7 @@ namespace patch::unity_bridge {
         uint32_t mapWhoType;  // CThing::f12_mapWhoType, meaning unknown (maybe: on the map / in a hand)
         int16_t floorHeight;  // CThing::f22_floorHeight
         uint16_t pad;
+        int32_t goldHeld;  // v14: CObject +0x14A (unionData.l40_gold.goldHeld) for gold (types 1, 2, 3), else 0
     };
 
     struct Tile {
@@ -258,7 +265,9 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, objectsTyped) == 244);
     static_assert(offsetof(Header, objectsState) == 248);
     static_assert(offsetof(Header, objectsMismatch) == 252);
-    static_assert(sizeof(Header) == 256);
+    static_assert(offsetof(Header, goldPerTile) == 256);
+    static_assert(offsetof(Header, goldPerTileHeart) == 260);
+    static_assert(sizeof(Header) == 264);
     static_assert(offsetof(Object, tagId) == 12);
     static_assert(offsetof(Object, owner) == 14);
     static_assert(offsetof(Object, direction) == 16);
@@ -269,7 +278,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, currentFrame) == 28);
     static_assert(offsetof(Object, mapWhoType) == 32);
     static_assert(offsetof(Object, floorHeight) == 36);
-    static_assert(sizeof(Object) == 40);
+    static_assert(offsetof(Object, goldHeld) == 40);
+    static_assert(sizeof(Object) == 44);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);

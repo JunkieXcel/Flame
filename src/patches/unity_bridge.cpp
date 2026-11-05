@@ -339,6 +339,7 @@ namespace {
             r.mapWhoType = o->f12_mapWhoType;
             r.floorHeight = o->f22_floorHeight;
             r.pad = 0;
+            r.goldHeld = (o->typeId >= 1 && o->typeId <= 3) ? o->unionData.l40_gold.goldHeld : 0;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
@@ -422,6 +423,8 @@ void patch::unity_bridge::write_frame() {
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;
     for (int c = 0; c < 3; ++c) h.tileLightOtherColour[c] = ((const int16_t *) 0x6F29F0)[c];
+    h.goldPerTile = *(const int32_t *) 0x6F25A4;  // no names for these globals yet
+    h.goldPerTileHeart = *(const int32_t *) 0x6F25A8;
     dk2::CDefaultPlayerInterface *player = inLevel ? dk2::CGameComponent_instance.gameSession.pPlayer : nullptr;
     h.handValid = player ? 1 : 0;
     if (player) {
