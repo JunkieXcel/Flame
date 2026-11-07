@@ -21,6 +21,7 @@
 #include "dk2/entities/data/MyTerrainDataObj.h"
 #include "dk2/utils/MyCameraState.h"
 #include "dk2_globals.h"
+#include "dk2_functions.h"
 #include "patches/logging.h"
 #include <tools/flame_config.h>
 
@@ -78,6 +79,32 @@ namespace {
         return light;
     }
 
+    // the index of a terrain in g_MyTerrainDataObj_arr, or -1
+    int terrainIndex(dk2::MyTerrainDataObj *terrain) {
+        if (!terrain) return -1;
+        for (int i = 0; i < 128; ++i) {
+            if (dk2::g_MyTerrainDataObj_arr[i] == terrain) return i;
+        }
+        return -1;
+    }
+
+    // the terrain DK2 draws the tile as, decided the way CBridge::sub_43E320 does (src/dk2/CBridge.cpp): a tile not
+    // yet seen (map element bit 0x2000 clear), outside a reveal area and with the camera not in mode 2/10/11 is drawn
+    // as "Claim Scan" (38) if +0xB bit 0x40 is set and its own terrain lacks flag 0x1000000, else as "Fog Of War" (27).
+    // fogTerrain / scanTerrain: the indices of those two terrains (-1 if unknown); cameraReveals: CCamera_sub_44DB70
+    uint8_t drawnTerrain(dk2::MyMapElement &e, int x, int y, int fogTerrain, int scanTerrain, bool cameraReveals) {
+        uint8_t own = e.arr6DA4A8_idx;
+        if ((e._playerIdFFF & 0x2000) != 0 || cameraReveals) return own;
+        // CBridge vtable +0xDC (v_fDC) = 441B00, called directly: the tile is in a temporary reveal area
+        if (dk2::CBridge_instance.fun_441B00(x, y)) return own;
+        if ((e.flags_and_burnLevel & 0x40) != 0) {
+            dk2::MyTerrainDataObj *terrain = dk2::g_MyTerrainDataObj_arr[own];
+            if (terrain && (terrain->_flags & 0x1000000) != 0) return own;
+            return scanTerrain >= 0 ? (uint8_t) scanTerrain : own;
+        }
+        return fogTerrain >= 0 ? (uint8_t) fogTerrain : own;
+    }
+
     // which full wall panels of a room tile use the second panel piece, the way CBridge::sub_444F10 picks them
     uint8_t wallPanels(dk2::MyMapElement &e, int x, int y) {
         using namespace patch::unity_bridge;
@@ -109,6 +136,11 @@ namespace {
         if (w <= 0 || h <= 0 || w > c_maxMapSide || h > c_maxMapSide) return TS_BadSize;
         if (!elements) return TS_NoTiles;
 
+        // the two terrains unseen tiles are drawn as, looked up the way sub_43E320 does
+        int fogTerrain = terrainIndex(world->v_f70_508DD0_getTerrainDataObj(27));
+        int scanTerrain = terrainIndex(world->v_f70_508DD0_getTerrainDataObj(38));
+        bool cameraReveals = dk2::CCamera_sub_44DB70(dk2::CBridge_instance.camera._mode) != 0;
+
         g_tiles.resize((size_t) w * h);
         for (int i = 0; i < w * h; ++i) {
             dk2::MyMapElement &e = elements[i];
@@ -118,7 +150,10 @@ namespace {
             t.owner = (uint16_t) (e._playerIdFFF & 0xFFF);
             t.room = (uint16_t) (e._roomIdFFF & 0xFFF);
             t.wallPanels = wallPanels(e, i % w, i / w);
-            t.pad2 = 0;
+            t.drawnTerrain = drawnTerrain(e, i % w, i / w, fogTerrain, scanTerrain, cameraReveals);
+            // CBridge::fun_43C310 (0x43CB44) skips sub_441CD0, the tile light, for a tile that is neither seen, revealed
+            // nor shown by the camera and has no +0xB bit 0x40 - exactly the tiles drawn as "Fog Of War"
+            if (fogTerrain >= 0 && t.drawnTerrain == fogTerrain && t.terrain != fogTerrain) t.light = 0;
         }
         for (int i = 0; i < 256; ++i) {
             dk2::MyTerrainDataObj *terrain = dk2::g_MyTerrainDataObj_arr[i];

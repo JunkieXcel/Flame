@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 15;
+    constexpr uint32_t c_version = 16;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -230,7 +230,9 @@ namespace patch::unity_bridge {
         uint16_t owner;  // MyMapElement::_playerIdFFF & 0xFFF
         uint16_t room;  // MyMapElement::_roomIdFFF & 0xFFF, 0 = no room
         uint8_t wallPanels;  // WallPanels, 0 for tiles that aren't in a room
-        uint8_t pad2;
+        // v16: the terrain DK2 draws the tile as (index into g_MyTerrainDataObj_arr), the way CBridge::sub_43E320 picks
+        // it: the tile's own terrain once seen, else 27 "Fog Of War" or 38 "Claim Scan" (both drawn as rock)
+        uint8_t drawnTerrain;
     };
 #pragma pack(pop)
 
@@ -302,6 +304,7 @@ namespace patch::unity_bridge {
     static_assert(sizeof(Tile) == 8);
     static_assert(offsetof(Tile, light) == 1);
     static_assert(offsetof(Tile, wallPanels) == 6);
+    static_assert(offsetof(Tile, drawnTerrain) == 7);
     static_assert(offsetof(TerrainLight, height) == 8);
     static_assert(sizeof(TerrainLight) == 12);
     static_assert(offsetof(Light, colour) == 12);
