@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 16;
+    constexpr uint32_t c_version = 17;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -176,7 +176,10 @@ namespace patch::unity_bridge {
         // v15: where the mesh sits from the light, 1/4096 tile, up = +z like pos: render info +0x51/53/55 (CLight
         // +0x77/79/7B). torches: 1/8 tile toward the wall (table 6D3980), so the holder sits on the wall face
         int16_t meshOffset[3];
-        uint8_t pad2[4];
+        // v17: the tile whose effect list (CBridge +0x326 grid, chained through CBridgeThing +6) holds the light, -1 if
+        // none. CBridge::fun_43C310 adds a tile's steady effects to the engine only when the tile is drawn normally
+        // (0x43CA72..0x43CA9F), so a light linked to an unseen tile gives no light and draws no mesh (LM_UnseenTile)
+        int16_t linkTile[2];
     };
 
     enum LightMesh : uint8_t {
@@ -184,6 +187,8 @@ namespace patch::unity_bridge {
         LM_Flame = 1 << 1,  // the mesh's world entry flag 1 (+0xB): CBridge::createMeshes draws the shared KTorch flame
                             // on a steady light with it, 0x4B0 above the light and 1/8 tile toward the wall
         LM_Drawn = 1 << 2,  // render info _flags2 bit 0 (CLight +0xD5); fun_439B90 clears it when a room has no holder
+        LM_UnseenTile = 1 << 3,  // v17: linkTile is a tile DK2 doesn't draw normally (not seen, not revealed, camera
+                                 // mode not 2/10/11), so fun_43C310 leaves the light out (fog of war)
     };
 
     // Tile::wallPanels: which of a room tile's full-width wall panels use the room's second panel piece
@@ -316,6 +321,7 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Light, meshFlags) == 34);
     static_assert(offsetof(Light, direction) == 36);
     static_assert(offsetof(Light, meshOffset) == 38);
+    static_assert(offsetof(Light, linkTile) == 44);
     static_assert(sizeof(Light) == 48);
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);

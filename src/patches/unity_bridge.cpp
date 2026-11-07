@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <unordered_map>
 #include <vector>
 #include "dk2/CBridge.h"
 #include "dk2/CCamera.h"
@@ -92,11 +93,17 @@ namespace {
     // yet seen (map element bit 0x2000 clear), outside a reveal area and with the camera not in mode 2/10/11 is drawn
     // as "Claim Scan" (38) if +0xB bit 0x40 is set and its own terrain lacks flag 0x1000000, else as "Fog Of War" (27).
     // fogTerrain / scanTerrain: the indices of those two terrains (-1 if unknown); cameraReveals: CCamera_sub_44DB70
+    // whether DK2 draws the tile normally (fun_43C310 0x43CA72..0x43CA9F, sub_43E320): seen (map element bit 0x2000),
+    // or the camera shows everything (CCamera_sub_44DB70), or the tile is in a temporary reveal area
+    bool shownNormally(dk2::MyMapElement &e, int x, int y, bool cameraReveals) {
+        if ((e._playerIdFFF & 0x2000) != 0 || cameraReveals) return true;
+        // CBridge vtable +0xDC (v_fDC) = 441B00, called directly
+        return dk2::CBridge_instance.fun_441B00(x, y) != 0;
+    }
+
     uint8_t drawnTerrain(dk2::MyMapElement &e, int x, int y, int fogTerrain, int scanTerrain, bool cameraReveals) {
         uint8_t own = e.arr6DA4A8_idx;
-        if ((e._playerIdFFF & 0x2000) != 0 || cameraReveals) return own;
-        // CBridge vtable +0xDC (v_fDC) = 441B00, called directly: the tile is in a temporary reveal area
-        if (dk2::CBridge_instance.fun_441B00(x, y)) return own;
+        if (shownNormally(e, x, y, cameraReveals)) return own;
         if ((e.flags_and_burnLevel & 0x40) != 0) {
             dk2::MyTerrainDataObj *terrain = dk2::g_MyTerrainDataObj_arr[own];
             if (terrain && (terrain->_flags & 0x1000000) != 0) return own;
@@ -298,6 +305,35 @@ namespace {
     // the "moving" field the engine checks at +0xE4 (CBridge::createMeshes 43CF7E, CBridge::fun_43C310 43C6DA)
     static_assert(offsetof(dk2::CBridgeThing, field_E0) == 0xE4);
 
+    // which tile's effect list each scene effect is linked into: CBridge +0x326 is a grid (dword 1 = uint16_t heads,
+    // 2 = width, 3 = height, read by sub_4435E0) of sceneEffects indices (& 0x1FFF), chained through CBridgeThing +6
+    // (fun_43C310 0x43CAA4..0x43CB42). Value = y * width + x of the map, or absent
+    std::unordered_map<const void *, int> g_effectTile;
+
+    // fills g_effectTile; false if the grid or map doesn't look usable (then no light gets a tile)
+    bool readEffectTiles(int &mapWidth, int &mapHeight) {
+        g_effectTile.clear();
+        mapWidth = mapHeight = 0;
+        dk2::CWorld *world = dk2::g_pCWorld;
+        if (!world || !world->cmap.opened || !world->cmap.mapElements) return false;
+        int w = world->cmap.width, h = world->cmap.height;
+        const uint32_t *grid = dk2::CBridge_instance.dword_arr_x4_objStart;
+        auto *heads = (const uint16_t *) grid[1];
+        if (!heads || (int) grid[2] != w || (int) grid[3] != h) return false;
+        for (int i = 0; i < w * h; ++i) {
+            uint16_t index = heads[i] & 0x1FFF;
+            for (int steps = 0; index != 0 && steps < 4096; ++steps) {
+                dk2::CBridgeThing *thing = dk2::sceneEffects[index];
+                if (!thing) break;
+                g_effectTile[thing] = i;
+                index = (uint16_t) thing->field_2;  // +6: the next effect on the same tile
+            }
+        }
+        mapWidth = w;
+        mapHeight = h;
+        return true;
+    }
+
     void writeLights(patch::unity_bridge::Header &h, bool inLevel) {
         using namespace patch::unity_bridge;
         h.lightsCount = 0;
@@ -306,6 +342,10 @@ namespace {
             h.lightsState = LS_NotInLevel;
             return;
         }
+        int linkWidth = 0, linkHeight = 0;
+        bool linked = readEffectTiles(linkWidth, linkHeight);
+        dk2::MyMapElement *elements = linked ? dk2::g_pCWorld->cmap.mapElements : nullptr;
+        bool cameraReveals = dk2::CCamera_sub_44DB70(dk2::CBridge_instance.camera._mode) != 0;
         auto *out = (Light *) ((uint8_t *) &h + c_lightsOffset);
         uint32_t count = 0;
         uint32_t inList = 0;
@@ -336,6 +376,16 @@ namespace {
                 if (ri.pWorldEntry->u.weB_flags & 1) meshFlags |= LM_Flame;
             }
             if (ri._flags2 & 1) meshFlags |= LM_Drawn;
+            l.linkTile[0] = l.linkTile[1] = -1;
+            if (linked) {
+                auto found = g_effectTile.find(static_cast<dk2::CBridgeThing *>(light));
+                if (found != g_effectTile.end()) {
+                    int x = found->second % linkWidth, y = found->second / linkWidth;
+                    l.linkTile[0] = (int16_t) x;
+                    l.linkTile[1] = (int16_t) y;
+                    if (!shownNormally(elements[found->second], x, y, cameraReveals)) meshFlags |= LM_UnseenTile;
+                }
+            }
             l.meshFlags = meshFlags;
             l.direction = light->fDE_angle;
             l.meshOffset[0] = ri.f51;
