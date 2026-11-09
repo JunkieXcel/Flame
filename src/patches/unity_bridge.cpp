@@ -442,6 +442,7 @@ namespace {
             r.baseColour[1] = (uint8_t) o->renderInfo.y49;
             r.baseColour[2] = (uint8_t) o->renderInfo.z4A;
             r.pad2 = 0;
+            r.lastFrame = o->renderInfo.lastFrame;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
@@ -527,6 +528,7 @@ void patch::unity_bridge::write_frame() {
     for (int c = 0; c < 3; ++c) h.tileLightOtherColour[c] = ((const int16_t *) 0x6F29F0)[c];
     h.goldPerTile = *(const int32_t *) 0x6F25A4;  // no names for these globals yet
     h.goldPerTileHeart = *(const int32_t *) 0x6F25A8;
+    h.tickPercent256 = dk2::CGameComponent_instance.gameSession.tickPercent256;
     dk2::CDefaultPlayerInterface *player = inLevel ? dk2::CGameComponent_instance.gameSession.pPlayer : nullptr;
     h.handValid = player ? 1 : 0;
     if (player) {

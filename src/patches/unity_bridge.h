@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 18;
+    constexpr uint32_t c_version = 19;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -137,6 +137,10 @@ namespace patch::unity_bridge {
         int32_t goldPerTile;  // global 6F25A4, variable 24 (GlobalVariables.kwd: 3000)
         int32_t goldPerTileHeart;  // global 6F25A8, variable 178 (1000): used instead when CRoom +0x18 == 5
                                    // (probably the Dungeon Heart) and CRoom +0x9A bit 0 is clear
+        // v19: how far the game is into the current tick, 0..255 (MyGameSession::tickPercent256, set before each draw).
+        // DK2 passes it / 256 to MyCameraState_575A00 (global 0x760B7C) and blends animations with it: phase =
+        // lastFrame + (currentFrame - lastFrame) x blend (CEngineAnimMesh constructor, read 2026-11-09)
+        uint32_t tickPercent256;
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -232,6 +236,9 @@ namespace patch::unity_bridge {
         // 0x20000000); 0 for most other objects; 255,255,255 while highlighted. Read as 0..255
         uint8_t baseColour[3];
         uint8_t pad2;
+        // v19: CRenderInfo::lastFrame (+0x90), the animation phase at the previous game tick (1/4096 of the whole
+        // animation, like currentFrame)
+        int32_t lastFrame;
     };
 
     struct Tile {
@@ -296,7 +303,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, objectsMismatch) == 252);
     static_assert(offsetof(Header, goldPerTile) == 256);
     static_assert(offsetof(Header, goldPerTileHeart) == 260);
-    static_assert(sizeof(Header) == 264);
+    static_assert(offsetof(Header, tickPercent256) == 264);
+    static_assert(sizeof(Header) == 268);
     static_assert(offsetof(Object, tagId) == 12);
     static_assert(offsetof(Object, owner) == 14);
     static_assert(offsetof(Object, direction) == 16);
@@ -310,7 +318,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, goldHeld) == 40);
     static_assert(offsetof(Object, baseColour) == 44);
     static_assert(offsetof(Object, pad2) == 47);
-    static_assert(sizeof(Object) == 48);
+    static_assert(offsetof(Object, lastFrame) == 48);
+    static_assert(sizeof(Object) == 52);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);
