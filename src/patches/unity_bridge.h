@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 17;
+    constexpr uint32_t c_version = 18;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -227,6 +227,11 @@ namespace patch::unity_bridge {
         int16_t floorHeight;  // CThing::f22_floorHeight
         uint16_t pad;
         int32_t goldHeld;  // v14: CObject +0x14A (unionData.l40_gold.goldHeld) for gold (types 1, 2, 3), else 0
+        // v18: the colour the engine starts the object's light from, before adding the lights (CRenderInfo +0x48/49/4A,
+        // CObject +0x8C/8D/8E). CRoom::fun_4E6220 sets it to the room terrain's ambient for room furniture (terrain flag
+        // 0x20000000); 0 for most other objects; 255,255,255 while highlighted. Read as 0..255
+        uint8_t baseColour[3];
+        uint8_t pad2;
     };
 
     struct Tile {
@@ -303,7 +308,9 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, mapWhoType) == 32);
     static_assert(offsetof(Object, floorHeight) == 36);
     static_assert(offsetof(Object, goldHeld) == 40);
-    static_assert(sizeof(Object) == 44);
+    static_assert(offsetof(Object, baseColour) == 44);
+    static_assert(offsetof(Object, pad2) == 47);
+    static_assert(sizeof(Object) == 48);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);

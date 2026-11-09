@@ -438,6 +438,10 @@ namespace {
             r.floorHeight = o->f22_floorHeight;
             r.pad = 0;
             r.goldHeld = (o->typeId >= 1 && o->typeId <= 3) ? o->unionData.l40_gold.goldHeld : 0;
+            r.baseColour[0] = (uint8_t) o->renderInfo.x48;
+            r.baseColour[1] = (uint8_t) o->renderInfo.y49;
+            r.baseColour[2] = (uint8_t) o->renderInfo.z4A;
+            r.pad2 = 0;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
