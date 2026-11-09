@@ -24,6 +24,10 @@
 #include "dk2_functions.h"
 #include "dk2_globals.h"
 
+namespace dk2 {
+    void MyDxKeyboard_onWindowActivated();  // MyDxKeyboard.cpp
+}
+
 
 namespace dk2 {
 
@@ -191,6 +195,7 @@ void dk2::MyDxInputManagerCb::call(int listNum, void *arg) {  // listNum=0
     case 4:  // activate message
         OutputDebugStringA("Activate Message Recieved\n");
         ShowCursor(evt->width == 0); // show if not activated
+        if (evt->width) dk2::MyDxKeyboard_onWindowActivated();
         if (!this->f50_createDD_state && evt->width)
             this->onWindowActivated(&status, evt->width);
         break;

@@ -11,15 +11,32 @@
 
 extern flame_config::define_flame_option<bool> o_keepRunningUnfocused;
 
+namespace {
+    // GetTickCount() when the DK2 window was last activated (0 = not yet)
+    DWORD g_activatedTick = 0;
+}
+
+namespace dk2 {
+    // called from MyDxInputManagerCb::call (WinEventHandlers.cpp) when the window is activated
+    void MyDxKeyboard_onWindowActivated() {
+        g_activatedTick = GetTickCount();
+    }
+}
+
 
 int dk2::MyDxKeyboard::processKeyboardData(int a2) {
     int result = a2 - 1;
     // in windowed mode the keyboard is read in the background, so with keep-running-unfocused
     // the game would react to typing in other windows. drop key presses while another window
-    // is in front; keep releases so a key held while switching away doesn't stay down
-    bool dropPresses = *o_keepRunningUnfocused && GetForegroundWindow() != getHWindow();
+    // is in front; keep releases so a key held while switching away doesn't stay down.
+    // DirectInput keeps queueing keys while the game isn't reading them (e.g. minimised), and
+    // the queue is read once DK2 is in front again, so also drop presses stamped before the
+    // window was last activated (dwTimeStamp uses the same clock as GetTickCount)
+    bool unfocused = GetForegroundWindow() != getHWindow();
     for (DIDEVICEOBJECTDATA *i = this->f2C_pdevObjArr; a2; --a2) {
-        if (dropPresses && (i->dwData & 0x80)) {
+        bool pressedBeforeActivation =
+                g_activatedTick != 0 && (int) (i->dwTimeStamp - g_activatedTick) < 0;
+        if (*o_keepRunningUnfocused && (i->dwData & 0x80) && (unfocused || pressedBeforeActivation)) {
             ++i;
             result = a2 - 1;
             continue;
