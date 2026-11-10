@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 19;
+    constexpr uint32_t c_version = 20;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -28,6 +28,8 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
     constexpr uint32_t c_objectsOffset = 3 * 1024 * 1024 + 512 * 1024;  // Object[objectsCount]
     constexpr uint32_t c_maxObjects = 4096;  // the size of the game's thing table, so every object fits
+    constexpr uint32_t c_roomsOffset = 3 * 1024 * 1024 + 768 * 1024;  // v20: Room[roomsCount]
+    constexpr uint32_t c_maxRooms = 4096;  // the size of the game's thing table, so every room fits
     constexpr uint32_t c_bendOffset = 4 * 1024 * 1024;  // TileBend[mapHeight][mapWidth], row by row like the tiles
     constexpr uint32_t c_maxBendTiles = 32768;  // a bigger map gets no TileBend table (BS_MapTooBig)
 
@@ -60,6 +62,12 @@ namespace patch::unity_bridge {
     enum ObjectsState : uint32_t {
         OS_Exported = 0,  // objectsCount objects: every CObject in the game's thing table
         OS_NotInLevel = 1,  // no level: objectsCount = 0
+    };
+
+    // v20: why the rooms of this frame were or were not exported
+    enum RoomsState : uint32_t {
+        RS_Exported = 0,  // roomsCount rooms: every CRoom in the game's thing table except type 0 (unused records)
+        RS_NotInLevel = 1,  // no level: roomsCount = 0
     };
 
     // why the TileBend table of this frame is what it is
@@ -141,6 +149,9 @@ namespace patch::unity_bridge {
         // DK2 passes it / 256 to MyCameraState_575A00 (global 0x760B7C) and blends animations with it: phase =
         // lastFrame + (currentFrame - lastFrame) x blend (CEngineAnimMesh constructor, read 2026-11-09)
         uint32_t tickPercent256;
+        // v20: the game's rooms: Room records at c_roomsOffset, copied every frame (a room can be destroyed any time)
+        uint32_t roomsCount;
+        uint32_t roomsState;  // RoomsState of this frame
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -241,6 +252,24 @@ namespace patch::unity_bridge {
         int32_t lastFrame;
     };
 
+    // v20: one CRoom from the game's thing table. Tile::room is its tagId (MyMapElement::getRoom, 0x4559B0, is
+    // sceneObjects[_roomIdFFF & 0xFFF]). Read 2026-11-10
+    struct Room {
+        uint16_t tagId;  // CTag::f0_tagId, its slot in the thing table = Tile::room of its tiles
+        uint8_t typeId;  // CRoom +0x18: the room type (Rooms.kwd: 5 Dungeon Heart, 20 Hero Gate 2x2, 23 Hero Gate 3x1 ...)
+        uint8_t flags;  // RoomFlags
+        // CRoom +0x9B (orientation): which way the room faces, 0..3. The level loader (CWorld_loadThing_Room) sets it
+        // from the level file for terrain 37 (Hero Gate 3x1); MyRooms::eventAttachAndReset when a room is placed (8 =
+        // keep). CBridge draws the 3x1 gate's pieces turned by (orientation + 1) & 3 (MyRooms::sub_4F00F0)
+        int32_t orientation;
+        uint8_t firstSlab[2];  // CRoom +0x2D/+0x2E: the room's first (top-left) tile x, y (assumed; the gates use it so)
+        uint16_t owner;  // CRoom +0x1D (playerId)
+    };
+
+    enum RoomFlags : uint8_t {
+        RF_Destroyed = 1 << 0,  // CRoom +0x9A bit 0, set by CRoom::fun_4E9130: DK2 draws the room's destroyed pieces
+    };
+
     struct Tile {
         uint8_t terrain;  // MyMapElement::arr6DA4A8_idx, the terrain type (index into g_MyTerrainDataObj_arr)
         uint8_t light;  // TileLight
@@ -304,7 +333,15 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, goldPerTile) == 256);
     static_assert(offsetof(Header, goldPerTileHeart) == 260);
     static_assert(offsetof(Header, tickPercent256) == 264);
-    static_assert(sizeof(Header) == 268);
+    static_assert(offsetof(Header, roomsCount) == 268);
+    static_assert(offsetof(Header, roomsState) == 272);
+    static_assert(sizeof(Header) == 276);
+    static_assert(offsetof(Room, typeId) == 2);
+    static_assert(offsetof(Room, flags) == 3);
+    static_assert(offsetof(Room, orientation) == 4);
+    static_assert(offsetof(Room, firstSlab) == 8);
+    static_assert(offsetof(Room, owner) == 10);
+    static_assert(sizeof(Room) == 12);
     static_assert(offsetof(Object, tagId) == 12);
     static_assert(offsetof(Object, owner) == 14);
     static_assert(offsetof(Object, direction) == 16);
@@ -344,7 +381,8 @@ namespace patch::unity_bridge {
     static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);
     static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
     static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_objectsOffset);
-    static_assert(c_objectsOffset + c_maxObjects * sizeof(Object) <= c_bendOffset);
+    static_assert(c_objectsOffset + c_maxObjects * sizeof(Object) <= c_roomsOffset);
+    static_assert(c_roomsOffset + c_maxRooms * sizeof(Room) <= c_bendOffset);
     static_assert(c_bendOffset + c_maxBendTiles * sizeof(TileBend) <= c_mappingSize);
 
     // called once per frame from engine_drawScene. does nothing unless flame:unity-bridge is set

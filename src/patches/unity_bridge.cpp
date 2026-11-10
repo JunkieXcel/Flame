@@ -450,6 +450,45 @@ namespace {
         h.objectsState = OS_Exported;
     }
 
+    // the CRoom fields the room table reads (offsets read in DKII.EXE 2026-11-10)
+    static_assert(offsetof(dk2::CRoom, typeId) == 0x18);
+    static_assert(offsetof(dk2::CRoom, playerId) == 0x1D);
+    static_assert(offsetof(dk2::CRoom, firstSlab) == 0x2D);
+    static_assert(offsetof(dk2::CRoom, destroyed) == 0x9A);
+    static_assert(offsetof(dk2::CRoom, orientation) == 0x9B);
+
+    // copies every room in the game's thing table. called between the odd and even sequence, like the camera
+    void writeRooms(patch::unity_bridge::Header &h, bool inLevel) {
+        using namespace patch::unity_bridge;
+        h.roomsCount = 0;
+        if (!inLevel) {
+            h.roomsState = RS_NotInLevel;
+            return;
+        }
+        auto *out = (Room *) ((uint8_t *) &h + c_roomsOffset);
+        uint32_t count = 0;
+        // rooms recognised by their vtable, like the objects. Slot 0 is never used
+        for (int tag = 1; tag < 4096 && count < c_maxRooms; ++tag) {
+            if (!dk2::sceneObjectsPresent[tag]) continue;
+            dk2::CTag *t = dk2::sceneObjects[tag];
+            if (!t) continue;
+            if (t->getVtbl() != dk2::CRoom::vftable) continue;
+            auto *room = (dk2::CRoom *) t;
+            // type 0 = an unused room record: DK2 keeps ~1800 of them in the table, none with tiles (seen 2026-11-10)
+            if (room->typeId == 0) continue;
+            Room &r = out[count++];
+            r.tagId = (uint16_t) tag;
+            r.typeId = room->typeId;
+            r.flags = (room->destroyed & 1) ? RF_Destroyed : 0;
+            r.orientation = room->orientation;
+            r.firstSlab[0] = room->firstSlab.x;
+            r.firstSlab[1] = room->firstSlab.y;
+            r.owner = room->playerId;
+        }
+        h.roomsCount = count;
+        h.roomsState = RS_Exported;
+    }
+
     bool open() {
         using namespace patch::unity_bridge;
         g_mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, c_mappingSize, c_mappingName);
@@ -522,6 +561,7 @@ void patch::unity_bridge::write_frame() {
     writeLights(h, inLevel);
     writeBend(h, inLevel);
     writeObjects(h, inLevel);
+    writeRooms(h, inLevel);
     h.ambient[0] = dk2::g_vec_760A98.x;
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;
