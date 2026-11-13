@@ -454,6 +454,7 @@ namespace {
     static_assert(offsetof(dk2::CRoom, typeId) == 0x18);
     static_assert(offsetof(dk2::CRoom, playerId) == 0x1D);
     static_assert(offsetof(dk2::CRoom, firstSlab) == 0x2D);
+    static_assert(offsetof(dk2::CRoom, specialTileOffset) == 0x80);
     static_assert(offsetof(dk2::CRoom, destroyed) == 0x9A);
     static_assert(offsetof(dk2::CRoom, orientation) == 0x9B);
 
@@ -479,7 +480,8 @@ namespace {
             Room &r = out[count++];
             r.tagId = (uint16_t) tag;
             r.typeId = room->typeId;
-            r.flags = (room->destroyed & 1) ? RF_Destroyed : 0;
+            r.flags = ((room->destroyed & 1) ? RF_Destroyed : 0)
+                      | ((room->specialTileOffset & 1) ? RF_SpecialTileOffset : 0);
             r.orientation = room->orientation;
             r.firstSlab[0] = room->firstSlab.x;
             r.firstSlab[1] = room->firstSlab.y;

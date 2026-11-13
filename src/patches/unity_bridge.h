@@ -16,7 +16,7 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 20;
+    constexpr uint32_t c_version = 21;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -268,6 +268,10 @@ namespace patch::unity_bridge {
 
     enum RoomFlags : uint8_t {
         RF_Destroyed = 1 << 0,  // CRoom +0x9A bit 0, set by CRoom::fun_4E9130: DK2 draws the room's destroyed pieces
+        // v21: CRoom +0x80 (specialTileOffset) bit 0, set by MyRooms::calcSpecialTileOffset (0x4EF5E0) for the Guard
+        // Room, Workshop and Casino. Their whole-tile floor piece goes on tiles where (x + y + this bit) is even
+        // (MyMapElement::sub_454110, read 2026-11-13)
+        RF_SpecialTileOffset = 1 << 1,
     };
 
     struct Tile {
