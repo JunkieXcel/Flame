@@ -16,13 +16,16 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 21;
+    constexpr uint32_t c_version = 22;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
     constexpr uint32_t c_terrainLightsOffset = 5120;  // TerrainLight[256]: the light each terrain type gives a tile
     constexpr uint32_t c_tilesOffset = 8192;  // Tile[mapHeight][mapWidth], row by row (y outer, x inner)
     constexpr int c_maxMapSide = 512;
+    // v22: Creature[creaturesCount], in the free gap between the largest tile table (ends ~2.01 MB) and the lights
+    constexpr uint32_t c_creaturesOffset = 2 * 1024 * 1024 + 512 * 1024;
+    constexpr uint32_t c_maxCreatures = 4096;  // the size of the game's thing table, so every creature fits
     constexpr uint32_t c_lightsOffset = 3 * 1024 * 1024;  // Light[lightsCount]
     constexpr uint32_t c_maxLights = 1024;
     constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
@@ -68,6 +71,12 @@ namespace patch::unity_bridge {
     enum RoomsState : uint32_t {
         RS_Exported = 0,  // roomsCount rooms: every CRoom in the game's thing table except type 0 (unused records)
         RS_NotInLevel = 1,  // no level: roomsCount = 0
+    };
+
+    // v22: why the creatures of this frame were or were not exported
+    enum CreaturesState : uint32_t {
+        CS_Exported = 0,  // creaturesCount records: every CCreature and CDeadBody in the game's thing table
+        CS_NotInLevel = 1,  // no level: creaturesCount = 0
     };
 
     // why the TileBend table of this frame is what it is
@@ -152,6 +161,10 @@ namespace patch::unity_bridge {
         // v20: the game's rooms: Room records at c_roomsOffset, copied every frame (a room can be destroyed any time)
         uint32_t roomsCount;
         uint32_t roomsState;  // RoomsState of this frame
+        // v22: the game's creatures and dead bodies: Creature records at c_creaturesOffset, copied every frame
+        uint32_t creaturesCount;
+        uint32_t creaturesState;  // CreaturesState of this frame
+        uint32_t creaturesMismatch;  // things whose vtable and CThing::fE_type disagree (expected 0)
     };
 
     // Tile::light: the one steady light the engine gives a tile (CBridge::sub_441CD0, a temporary
@@ -266,6 +279,39 @@ namespace patch::unity_bridge {
         uint16_t owner;  // CRoom +0x1D (playerId)
     };
 
+    // v22: one CCreature or CDeadBody from the game's thing table. Read 2026-11-14 (Research\Creatures.md)
+    struct Creature {
+        int32_t pos[3];  // CThing +0x1A f16_pos, 1/4096 of a tile, up = +z like the objects
+        // CMovingThing +0xF6 (a CDeadBody keeps the same place): what getLastPosition (0x4B5D40) returns. The engine
+        // draws the thing between lastPos and pos by tickPercent256 (CPCEngineInterface::createCPhysicalThing 0x59D380)
+        int32_t lastPos[3];
+        uint16_t tagId;  // CTag::f0_tagId, its slot in the thing table
+        uint16_t owner;  // CThing +0x28 f24_playerId
+        uint16_t direction;  // CPhysicalThing +0xF4 fF0_direction, 0..2047 (the engine adds 0x400 to both facings)
+        uint16_t lastDirection;  // CMovingThing +0x102 lastAngle: what getLastDirection (0x4B5D50) returns
+        // CThing::fE_type: 0 = creature, 6 = dead body. 9 seen 2026-11-15 on CCreatures sitting on Portal tiles with
+        // owner 0, health 0, height 0: assumed creatures waiting in a Portal, not on the map (counted as mismatch)
+        uint8_t kind;
+        uint8_t typeId;  // CCreature +0x36F / CDeadBody +0x128: the creature type (Creatures.kwd)
+        uint8_t animationId;  // render info +0xAE: DK2's animation id 0..41 (a dead body says 7 but shows slot 41)
+        // the art slot actually drawn, 0..47: (render info pWorldEntry - the type's MyCreatureDataObj) / 27, after
+        // DK2's fallback for missing animations (MyCreatureDataObj::fun_494880). 0..41 follow the animation ids,
+        // 42..47 are six extra animations (e.g. idle Imps draw 42). 255 = not inside the type's 48 slots
+        uint8_t artSlot;
+        int32_t currentFrame;  // render info +0x94, 1/4096 of the whole animation like the objects
+        int32_t lastFrame;  // render info +0x90, the phase at the previous tick
+        uint32_t stateFlags;  // CCreature +0x3E6 (creature_state.h StateFlags1_*: 0x1 in hand, 0x80 possessed ...), 0 for a body
+        uint32_t stateFlags2;  // CCreature +0x3EA (StateFlags2_*: 0x2 animation backwards ...), 0 for a body
+        uint32_t stateId;  // CCreature cstate.currentStateId (+0x24E + 0x10), 0 for a body
+        int32_t health;  // CPhysicalThing +0x40 f3C_health
+        uint8_t level;  // CCreature +0x403 / CDeadBody +0x12D
+        uint8_t baseColour[3];  // render info +0x48..4A, like Object::baseColour (255,255,255 while highlighted)
+        uint8_t textureBank;  // render info +0xAC: 1 = alternate skin (mercenaries, creature data flag 0x8000000)
+        uint8_t pad[3];
+        uint32_t widthScale;  // render info +0x4 _widthScale: createCEngineAnimMesh reads it (units unchecked)
+        int32_t heightScale;  // render info +0x8 _heightScale
+    };
+
     enum RoomFlags : uint8_t {
         RF_Destroyed = 1 << 0,  // CRoom +0x9A bit 0, set by CRoom::fun_4E9130: DK2 draws the room's destroyed pieces
         // v21: CRoom +0x80 (specialTileOffset) bit 0, set by MyRooms::calcSpecialTileOffset (0x4EF5E0) for the Guard
@@ -339,7 +385,31 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Header, tickPercent256) == 264);
     static_assert(offsetof(Header, roomsCount) == 268);
     static_assert(offsetof(Header, roomsState) == 272);
-    static_assert(sizeof(Header) == 276);
+    static_assert(offsetof(Header, creaturesCount) == 276);
+    static_assert(offsetof(Header, creaturesState) == 280);
+    static_assert(offsetof(Header, creaturesMismatch) == 284);
+    static_assert(sizeof(Header) == 288);
+    static_assert(offsetof(Creature, lastPos) == 12);
+    static_assert(offsetof(Creature, tagId) == 24);
+    static_assert(offsetof(Creature, owner) == 26);
+    static_assert(offsetof(Creature, direction) == 28);
+    static_assert(offsetof(Creature, lastDirection) == 30);
+    static_assert(offsetof(Creature, kind) == 32);
+    static_assert(offsetof(Creature, typeId) == 33);
+    static_assert(offsetof(Creature, animationId) == 34);
+    static_assert(offsetof(Creature, artSlot) == 35);
+    static_assert(offsetof(Creature, currentFrame) == 36);
+    static_assert(offsetof(Creature, lastFrame) == 40);
+    static_assert(offsetof(Creature, stateFlags) == 44);
+    static_assert(offsetof(Creature, stateFlags2) == 48);
+    static_assert(offsetof(Creature, stateId) == 52);
+    static_assert(offsetof(Creature, health) == 56);
+    static_assert(offsetof(Creature, level) == 60);
+    static_assert(offsetof(Creature, baseColour) == 61);
+    static_assert(offsetof(Creature, textureBank) == 64);
+    static_assert(offsetof(Creature, widthScale) == 68);
+    static_assert(offsetof(Creature, heightScale) == 72);
+    static_assert(sizeof(Creature) == 76);
     static_assert(offsetof(Room, typeId) == 2);
     static_assert(offsetof(Room, flags) == 3);
     static_assert(offsetof(Room, orientation) == 4);
@@ -383,7 +453,8 @@ namespace patch::unity_bridge {
     static_assert(sizeof(Header) <= c_terrainFlagsOffset);
     static_assert(c_terrainFlagsOffset + 256 * sizeof(uint32_t) <= c_terrainLightsOffset);
     static_assert(c_terrainLightsOffset + 256 * sizeof(TerrainLight) <= c_tilesOffset);
-    static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_lightsOffset);
+    static_assert(c_tilesOffset + c_maxMapSide * c_maxMapSide * sizeof(Tile) <= c_creaturesOffset);
+    static_assert(c_creaturesOffset + c_maxCreatures * sizeof(Creature) <= c_lightsOffset);
     static_assert(c_lightsOffset + c_maxLights * sizeof(Light) <= c_objectsOffset);
     static_assert(c_objectsOffset + c_maxObjects * sizeof(Object) <= c_roomsOffset);
     static_assert(c_roomsOffset + c_maxRooms * sizeof(Room) <= c_bendOffset);

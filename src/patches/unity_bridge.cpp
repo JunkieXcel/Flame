@@ -17,6 +17,10 @@
 #include "dk2/NewObj571B3B.h"
 #include "dk2/engine/CWorldEntry.h"
 #include "dk2/entities/CObject.h"
+#include "dk2/entities/CCreature.h"
+#include "dk2/entities/CDeadBody.h"
+#include "dk2/entities/data/MyCreatureDataObj.h"
+#include "dk2/CState.h"
 #include "dk2/entities/CRoom.h"
 #include "dk2/world/map/MyMapElement.h"
 #include "dk2/entities/data/MyTerrainDataObj.h"
@@ -491,6 +495,126 @@ namespace {
         h.roomsState = RS_Exported;
     }
 
+    // the fields the creature table reads (offsets read in DKII.EXE 2026-11-14, Research\Creatures.md)
+    static_assert(offsetof(dk2::CThing, f16_pos) == 0x1A);
+    static_assert(offsetof(dk2::CThing, f24_playerId) == 0x28);
+    static_assert(offsetof(dk2::CPhysicalThing, f3C_health) == 0x40);
+    static_assert(offsetof(dk2::CPhysicalThing, renderInfo) == 0x44);
+    static_assert(offsetof(dk2::CPhysicalThing, fF0_direction) == 0xF4);
+    static_assert(offsetof(dk2::CMovingThing, lastPosition) == 0xF6);
+    static_assert(offsetof(dk2::CMovingThing, lastAngle) == 0x102);
+    static_assert(offsetof(dk2::CCreature, cstate) == 0x24E);
+    static_assert(offsetof(dk2::CState, currentStateId) == 0x10);
+    static_assert(offsetof(dk2::CCreature, typeId) == 0x36F);
+    static_assert(offsetof(dk2::CCreature, creatureData) == 0x370);
+    static_assert(offsetof(dk2::CCreature, level) == 0x403);
+    static_assert(offsetof(dk2::CCreature, stateFlags) == 0x3E6);
+    static_assert(offsetof(dk2::CCreature, stateFlags2) == 0x3EA);
+    static_assert(offsetof(dk2::CDeadBody, fF6) == 0xF6);  // last position (getLastPosition 0x4B5D40, shared)
+    static_assert(offsetof(dk2::CDeadBody, f102) == 0x102);  // last facing (getLastDirection 0x4B5D50, shared)
+    static_assert(offsetof(dk2::CDeadBody, typeId) == 0x128);
+    static_assert(offsetof(dk2::CDeadBody, f129) == 0x129);  // its MyCreatureDataObj * (CDeadBody::init 0x4B0FEC)
+    static_assert(offsetof(dk2::CDeadBody, level) == 0x12D);
+    static_assert(offsetof(dk2::CRenderInfo, _widthScale) == 0x4);
+    static_assert(offsetof(dk2::CRenderInfo, _heightScale) == 0x8);
+    static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
+    static_assert(offsetof(dk2::CRenderInfo, lastFrame) == 0x90);
+    static_assert(offsetof(dk2::CRenderInfo, currentFrame) == 0x94);
+    static_assert(offsetof(dk2::CRenderInfo, textureBank) == 0xAC);
+    static_assert(offsetof(dk2::CRenderInfo, animationId) == 0xAE);
+    static_assert(sizeof(dk2::CWorldEntry) == 27);
+
+    // which of the type's 48 creature art slots (27-byte CWorldEntry records from the start of MyCreatureDataObj, read
+    // 2026-11-14: MyCreatureDataObj::fun_494860) the render info draws. Slots 0..41 follow the animation ids; 42..47
+    // are six extra animations (alternative idles, digs, attacks; loadCreatureType loop at 0x493307, read 2026-11-15:
+    // idle Imps draw slot 42). Slots 48..52 hold interface pictures, never a creature's model. 255 = anywhere else
+    uint8_t artSlotOf(const dk2::CRenderInfo &ri, const void *creatureData) {
+        if (!creatureData || !ri.pWorldEntry) return 255;
+        intptr_t diff = (intptr_t) ri.pWorldEntry - (intptr_t) creatureData;
+        if (diff < 0 || diff % 27 != 0 || diff / 27 >= 48) return 255;
+        return (uint8_t) (diff / 27);
+    }
+
+    // the fields creatures and dead bodies share (both are CPhysicalThings; their last position and facing sit at the
+    // same offsets, see the asserts above)
+    void fillPhysical(patch::unity_bridge::Creature &r, dk2::CPhysicalThing *p, const dk2::Vec3i &lastPos,
+                      uint16_t lastDirection) {
+        r.pos[0] = p->f16_pos.x;
+        r.pos[1] = p->f16_pos.y;
+        r.pos[2] = p->f16_pos.z;
+        r.lastPos[0] = lastPos.x;
+        r.lastPos[1] = lastPos.y;
+        r.lastPos[2] = lastPos.z;
+        r.tagId = p->f0_tagId;
+        r.owner = p->f24_playerId;
+        r.direction = p->fF0_direction;
+        r.lastDirection = lastDirection;
+        r.animationId = p->renderInfo.animationId;
+        r.currentFrame = p->renderInfo.currentFrame;
+        r.lastFrame = p->renderInfo.lastFrame;
+        r.health = p->f3C_health;
+        r.baseColour[0] = (uint8_t) p->renderInfo.x48;
+        r.baseColour[1] = (uint8_t) p->renderInfo.y49;
+        r.baseColour[2] = (uint8_t) p->renderInfo.z4A;
+        r.textureBank = p->renderInfo.textureBank;
+        r.pad[0] = r.pad[1] = r.pad[2] = 0;
+        r.widthScale = p->renderInfo._widthScale;
+        r.heightScale = p->renderInfo._heightScale;
+    }
+
+    // copies every creature and dead body in the game's thing table (creatures in the hand stay in it, with
+    // stateFlags 0x1). called between the odd and even sequence, like the camera
+    void writeCreatures(patch::unity_bridge::Header &h, bool inLevel) {
+        using namespace patch::unity_bridge;
+        h.creaturesCount = 0;
+        h.creaturesMismatch = 0;
+        if (!inLevel) {
+            h.creaturesState = CS_NotInLevel;
+            return;
+        }
+        auto *out = (Creature *) ((uint8_t *) &h + c_creaturesOffset);
+        uint32_t count = 0;
+        uint32_t mismatch = 0;
+        // recognised by their vtable, like the objects. Slot 0 is never used
+        for (int tag = 1; tag < 4096 && count < c_maxCreatures; ++tag) {
+            if (!dk2::sceneObjectsPresent[tag]) continue;
+            dk2::CTag *t = dk2::sceneObjects[tag];
+            if (!t) continue;
+            void *vtbl = t->getVtbl();
+            if (vtbl == dk2::CCreature::vftable) {
+                auto *c = (dk2::CCreature *) t;
+                // DK2 keeps spare creature records in the table (seen 2026-11-15: 429 all-zero records, slots
+                // 8..436); type 0 is no creature type (Imp = 1), so those are left out
+                if (c->typeId == 0) continue;
+                if (c->fE_type != 0) mismatch++;
+                Creature &r = out[count++];
+                fillPhysical(r, c, c->lastPosition, c->lastAngle);
+                r.kind = (uint8_t) c->fE_type;
+                r.typeId = c->typeId;
+                r.artSlot = artSlotOf(c->renderInfo, c->creatureData);
+                r.stateFlags = c->stateFlags;
+                r.stateFlags2 = c->stateFlags2;
+                r.stateId = c->cstate.currentStateId;
+                r.level = c->level;
+            } else if (vtbl == dk2::CDeadBody::vftable) {
+                auto *b = (dk2::CDeadBody *) t;
+                if (b->fE_type != 6) mismatch++;
+                Creature &r = out[count++];
+                fillPhysical(r, b, *(const dk2::Vec3i *) &b->fF6, (uint16_t) b->f102);
+                r.kind = (uint8_t) b->fE_type;
+                r.typeId = b->typeId;
+                r.artSlot = artSlotOf(b->renderInfo, (const void *) (uintptr_t) b->f129);
+                r.stateFlags = 0;
+                r.stateFlags2 = 0;
+                r.stateId = 0;
+                r.level = b->level;
+            }
+        }
+        h.creaturesCount = count;
+        h.creaturesMismatch = mismatch;
+        h.creaturesState = CS_Exported;
+    }
+
     bool open() {
         using namespace patch::unity_bridge;
         g_mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, c_mappingSize, c_mappingName);
@@ -564,6 +688,7 @@ void patch::unity_bridge::write_frame() {
     writeBend(h, inLevel);
     writeObjects(h, inLevel);
     writeRooms(h, inLevel);
+    writeCreatures(h, inLevel);
     h.ambient[0] = dk2::g_vec_760A98.x;
     h.ambient[1] = dk2::g_vec_760A98.y;
     h.ambient[2] = dk2::g_vec_760A98.z;
