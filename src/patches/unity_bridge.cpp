@@ -447,6 +447,17 @@ namespace {
             r.baseColour[2] = (uint8_t) o->renderInfo.z4A;
             r.pad2 = 0;
             r.lastFrame = o->renderInfo.lastFrame;
+            r.lastPos[0] = o->lastPosition.x;
+            r.lastPos[1] = o->lastPosition.y;
+            r.lastPos[2] = o->lastPosition.z;
+            r.lastDirection = o->lastAngle;
+            r.pad3 = 0;
+            r.widthScale = o->renderInfo._widthScale;
+            r.heightScale = o->renderInfo._heightScale;
+            r.drawOffset[0] = o->renderInfo.f51;
+            r.drawOffset[1] = o->renderInfo.f53;
+            r.drawOffset[2] = o->renderInfo.f55;
+            r.pad4 = 0;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
@@ -518,6 +529,9 @@ namespace {
     static_assert(offsetof(dk2::CRenderInfo, _widthScale) == 0x4);
     static_assert(offsetof(dk2::CRenderInfo, _heightScale) == 0x8);
     static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
+    static_assert(offsetof(dk2::CRenderInfo, f51) == 0x51);  // the draw offset (static_CRenderInfo_sub_59C2A0)
+    static_assert(offsetof(dk2::CRenderInfo, f53) == 0x53);
+    static_assert(offsetof(dk2::CRenderInfo, f55) == 0x55);
     static_assert(offsetof(dk2::CRenderInfo, lastFrame) == 0x90);
     static_assert(offsetof(dk2::CRenderInfo, currentFrame) == 0x94);
     static_assert(offsetof(dk2::CRenderInfo, textureBank) == 0xAC);
