@@ -289,8 +289,9 @@ namespace patch::unity_bridge {
         uint16_t owner;  // CThing +0x28 f24_playerId
         uint16_t direction;  // CPhysicalThing +0xF4 fF0_direction, 0..2047 (the engine adds 0x400 to both facings)
         uint16_t lastDirection;  // CMovingThing +0x102 lastAngle: what getLastDirection (0x4B5D50) returns
-        // CThing::fE_type: 0 = creature, 6 = dead body. 9 seen 2026-11-15 on CCreatures sitting on Portal tiles with
-        // owner 0, health 0, height 0: assumed creatures waiting in a Portal, not on the map (counted as mismatch)
+        // CThing::fE_type: 0 = creature, 6 = dead body, 9 = the leftover CCreature of a creature that died or left
+        // (owner 0, health 0, left where it was; a dying Wizard's record turned 9 when its body appeared, 2026-11-15 -
+        // first guessed as "in a Portal"). Not on the map (counted as mismatch)
         uint8_t kind;
         uint8_t typeId;  // CCreature +0x36F / CDeadBody +0x128: the creature type (Creatures.kwd)
         uint8_t animationId;  // render info +0xAE: DK2's animation id 0..41 (a dead body says 7 but shows slot 41)
