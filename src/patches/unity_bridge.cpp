@@ -472,6 +472,9 @@ namespace {
     static_assert(offsetof(dk2::CRoom, specialTileOffset) == 0x80);
     static_assert(offsetof(dk2::CRoom, destroyed) == 0x9A);
     static_assert(offsetof(dk2::CRoom, orientation) == 0x9B);
+    // v26: the door tiles (Prison +0x51/+0x55, Combat Pit +0x4B/+0x4F) lie inside this 30-byte union
+    static_assert(offsetof(dk2::CRoom, field_49_union_start) == 0x49);
+    static_assert(0x55 + 4 <= 0x49 + sizeof(dk2::CRoom::field_49_union_start));
 
     // copies every room in the game's thing table. called between the odd and even sequence, like the camera
     void writeRooms(patch::unity_bridge::Header &h, bool inLevel) {
@@ -501,6 +504,18 @@ namespace {
             r.firstSlab[0] = room->firstSlab.x;
             r.firstSlab[1] = room->firstSlab.y;
             r.owner = room->playerId;
+            // v26: the door tile, from the room type's own two int32s inside CRoom's union (+0x49)
+            r.doorTile[0] = r.doorTile[1] = 255;
+            r.pad[0] = r.pad[1] = 0;
+            int doorAt = room->typeId == 11 ? 0x51 : room->typeId == 16 ? 0x4B : 0;
+            if (doorAt != 0) {
+                int32_t door[2];
+                std::memcpy(door, (const uint8_t *) room + doorAt, sizeof(door));
+                if (door[0] >= 0 && door[0] < 255 && door[1] >= 0 && door[1] < 255) {
+                    r.doorTile[0] = (uint8_t) door[0];
+                    r.doorTile[1] = (uint8_t) door[1];
+                }
+            }
         }
         h.roomsCount = count;
         h.roomsState = RS_Exported;

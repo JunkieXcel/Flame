@@ -17,8 +17,8 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
     // v23-25 (2026-11-15, one feature; v23/v24 were test builds): objects' last position/facing, width/height scale
-    // and draw offset
-    constexpr uint32_t c_version = 25;
+    // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes
+    constexpr uint32_t c_version = 26;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -294,6 +294,11 @@ namespace patch::unity_bridge {
         int32_t orientation;
         uint8_t firstSlab[2];  // CRoom +0x2D/+0x2E: the room's first (top-left) tile x, y (assumed; the gates use it so)
         uint16_t owner;  // CRoom +0x1D (playerId)
+        // v26: the room's door tile x, y; 255, 255 = none. Prison (type 11): CRoom +0x51/+0x55 (int32 each, read by
+        // CRoom::sub_4E3270, set by 0x4E32C0: 0, 0 when no tile qualifies). Combat Pit (type 16): CRoom +0x4B/+0x4F
+        // (sub_4D7160). CBridge::sub_443F20 draws only piece 14, whole and unturned, on that tile (read 2026-11-16)
+        uint8_t doorTile[2];
+        uint8_t pad[2];
     };
 
     // v22: one CCreature or CDeadBody from the game's thing table. Read 2026-11-14 (Research\Creatures.md)
@@ -433,7 +438,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Room, orientation) == 4);
     static_assert(offsetof(Room, firstSlab) == 8);
     static_assert(offsetof(Room, owner) == 10);
-    static_assert(sizeof(Room) == 12);
+    static_assert(offsetof(Room, doorTile) == 12);
+    static_assert(sizeof(Room) == 16);
     static_assert(offsetof(Object, tagId) == 12);
     static_assert(offsetof(Object, owner) == 14);
     static_assert(offsetof(Object, direction) == 16);
