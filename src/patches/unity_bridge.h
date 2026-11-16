@@ -16,7 +16,9 @@ namespace patch::unity_bridge {
     constexpr const char *c_mappingName = "Local\\FlameUnityBridge";
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
-    constexpr uint32_t c_version = 22;
+    // v23-25 (2026-11-15, one feature; v23/v24 were test builds): objects' last position/facing, width/height scale
+    // and draw offset
+    constexpr uint32_t c_version = 25;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -31,7 +33,8 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_maxListWalk = 65536;  // a longer light list is taken as broken
     constexpr uint32_t c_objectsOffset = 3 * 1024 * 1024 + 512 * 1024;  // Object[objectsCount]
     constexpr uint32_t c_maxObjects = 4096;  // the size of the game's thing table, so every object fits
-    constexpr uint32_t c_roomsOffset = 3 * 1024 * 1024 + 768 * 1024;  // v20: Room[roomsCount]
+    // v20: Room[roomsCount]; v24: moved from +768 KB, the bigger objects (84 bytes x 4096) end at +848 KB
+    constexpr uint32_t c_roomsOffset = 3 * 1024 * 1024 + 848 * 1024;
     constexpr uint32_t c_maxRooms = 4096;  // the size of the game's thing table, so every room fits
     constexpr uint32_t c_bendOffset = 4 * 1024 * 1024;  // TileBend[mapHeight][mapWidth], row by row like the tiles
     constexpr uint32_t c_maxBendTiles = 32768;  // a bigger map gets no TileBend table (BS_MapTooBig)
@@ -263,6 +266,20 @@ namespace patch::unity_bridge {
         // v19: CRenderInfo::lastFrame (+0x90), the animation phase at the previous game tick (1/4096 of the whole
         // animation, like currentFrame)
         int32_t lastFrame;
+        // v23: CMovingThing::fF6_lastPosition / f102_lastAngle (CObject is a CMovingThing, offsets as for creatures):
+        // where the object was and which way it faced at the previous tick. DK2 draws it between the two by
+        // tickPercent256 (CPCEngineInterface::createCPhysicalThing 0x59D380, read for creatures)
+        int32_t lastPos[3];
+        uint16_t lastDirection;
+        uint16_t pad3;
+        // v23: CRenderInfo +0x4 _widthScale / +0x8 _heightScale, as for creatures: createCEngineDynamicMesh (0x59CD82,
+        // 0x59CD8D, read 2026-11-15) sizes an object's still mesh by them too. 4096 = 1 for creatures (checked)
+        uint32_t widthScale;
+        int32_t heightScale;
+        // v24: CRenderInfo +0x51/+0x53/+0x55 (f51, f53, f55): an offset the engine adds to both pos and lastPos before
+        // drawing (static_CRenderInfo_sub_59C2A0, read 2026-11-15), same units. E.g. lifts Library spell books
+        int16_t drawOffset[3];
+        uint16_t pad4;
     };
 
     // v20: one CRoom from the game's thing table. Tile::room is its tagId (MyMapElement::getRoom, 0x4559B0, is
@@ -431,7 +448,12 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, baseColour) == 44);
     static_assert(offsetof(Object, pad2) == 47);
     static_assert(offsetof(Object, lastFrame) == 48);
-    static_assert(sizeof(Object) == 52);
+    static_assert(offsetof(Object, lastPos) == 52);
+    static_assert(offsetof(Object, lastDirection) == 64);
+    static_assert(offsetof(Object, widthScale) == 68);
+    static_assert(offsetof(Object, heightScale) == 72);
+    static_assert(offsetof(Object, drawOffset) == 76);
+    static_assert(sizeof(Object) == 84);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
     static_assert(sizeof(Tile) == 8);
