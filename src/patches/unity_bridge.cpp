@@ -451,13 +451,13 @@ namespace {
             r.lastPos[1] = o->lastPosition.y;
             r.lastPos[2] = o->lastPosition.z;
             r.lastDirection = o->lastAngle;
-            r.pad3 = 0;
+            r.tiltA = (uint16_t) o->renderInfo.f20;
             r.widthScale = o->renderInfo._widthScale;
             r.heightScale = o->renderInfo._heightScale;
             r.drawOffset[0] = o->renderInfo.f51;
             r.drawOffset[1] = o->renderInfo.f53;
             r.drawOffset[2] = o->renderInfo.f55;
-            r.pad4 = 0;
+            r.tiltB = o->renderInfo.f24;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
@@ -526,6 +526,8 @@ namespace {
     static_assert(offsetof(dk2::CThing, f24_playerId) == 0x28);
     static_assert(offsetof(dk2::CPhysicalThing, f3C_health) == 0x40);
     static_assert(offsetof(dk2::CPhysicalThing, renderInfo) == 0x44);
+    static_assert(offsetof(dk2::CRenderInfo, f20) == 0x20);  // v27 tilt angles, CObject +0x64 / +0x68
+    static_assert(offsetof(dk2::CRenderInfo, f24) == 0x24);
     static_assert(offsetof(dk2::CPhysicalThing, fF0_direction) == 0xF4);
     static_assert(offsetof(dk2::CMovingThing, lastPosition) == 0xF6);
     static_assert(offsetof(dk2::CMovingThing, lastAngle) == 0x102);

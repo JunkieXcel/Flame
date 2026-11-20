@@ -17,8 +17,9 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
     // v23-25 (2026-11-15, one feature; v23/v24 were test builds): objects' last position/facing, width/height scale
-    // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes
-    constexpr uint32_t c_version = 26;
+    // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes.
+    // v27 (2026-11-20): objects' two tilt angles (in the old pad3 / pad4 slots, same size)
+    constexpr uint32_t c_version = 27;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -271,7 +272,10 @@ namespace patch::unity_bridge {
         // tickPercent256 (CPCEngineInterface::createCPhysicalThing 0x59D380, read for creatures)
         int32_t lastPos[3];
         uint16_t lastDirection;
-        uint16_t pad3;
+        // v27: CRenderInfo +0x20 (f20): a tilt angle, 2048 = full turn. createCEngineDynamicMesh (0x59CCF0) turns the
+        // still mesh by it, by tiltB and by the facing. Room furniture placement sets 0x600 for Torture Wheels (type 8,
+        // 0x4EE3FF), which lays them flat (read 2026-11-20, Research/Rooms.md)
+        uint16_t tiltA;
         // v23: CRenderInfo +0x4 _widthScale / +0x8 _heightScale, as for creatures: createCEngineDynamicMesh (0x59CD82,
         // 0x59CD8D, read 2026-11-15) sizes an object's still mesh by them too. 4096 = 1 for creatures (checked)
         uint32_t widthScale;
@@ -279,7 +283,9 @@ namespace patch::unity_bridge {
         // v24: CRenderInfo +0x51/+0x53/+0x55 (f51, f53, f55): an offset the engine adds to both pos and lastPos before
         // drawing (static_CRenderInfo_sub_59C2A0, read 2026-11-15), same units. E.g. lifts Library spell books
         int16_t drawOffset[3];
-        uint16_t pad4;
+        // v27: CRenderInfo +0x24 (f24): the second tilt angle, same units. CObject::state30 (0x4A1C60) spins a wheel by
+        // it (in its own plane) when it doesn't spin the facing
+        uint16_t tiltB;
     };
 
     // v20: one CRoom from the game's thing table. Tile::room is its tagId (MyMapElement::getRoom, 0x4559B0, is
@@ -456,9 +462,11 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, lastFrame) == 48);
     static_assert(offsetof(Object, lastPos) == 52);
     static_assert(offsetof(Object, lastDirection) == 64);
+    static_assert(offsetof(Object, tiltA) == 66);
     static_assert(offsetof(Object, widthScale) == 68);
     static_assert(offsetof(Object, heightScale) == 72);
     static_assert(offsetof(Object, drawOffset) == 76);
+    static_assert(offsetof(Object, tiltB) == 82);
     static_assert(sizeof(Object) == 84);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);
