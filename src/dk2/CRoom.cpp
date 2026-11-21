@@ -220,6 +220,33 @@ int dk2::MyRooms::createRooms(CWorld *a2_world) {
     return 1;
 }
 
+// Resets all rooms (called while setting up the world, e.g. loading a save from inside a level).
+// The original rebuilds the free list for a hard-coded 0x2A0 rooms; with the extended rooms limit
+// createRooms allocates MaxRoomCount, so the remaining rooms kept stale list links and a later
+// forced-index createRoom could turn the active room list into a cycle (endless loop in
+// attachToNearForceOrCreate).
+int dk2::MyRooms::fun_4EC360() {
+    while (this->firstRoomId)
+        this->removeRoom(this->firstRoomId);
+    this->firstRoomId = 0;
+    this->_nextRoomId = 0;
+    for (unsigned int i = 0; i < MaxRoomCount; ++i) {
+        CRoom *room = &this->CRoom_arr_p[i];
+        unsigned __int16 f0_tagId = room->f0_tagId;
+        room->roomManagerNode.x = 0;
+        room->roomManagerNode.y = 0;
+        room->playerRoomListNodeX = 0;
+        room->playerRoomListNodeY = 0;
+        room->changedAreaRoomListNode.x = 0;
+        room->changedAreaRoomListNode.y = 0;
+        ((CRoom *) sceneObjects[f0_tagId])->roomManagerNode.y = this->_nextRoomId;
+        if (this->_nextRoomId)
+            ((CRoom *) sceneObjects[this->_nextRoomId])->roomManagerNode.x = f0_tagId;
+        this->_nextRoomId = f0_tagId;
+    }
+    return 1;
+}
+
 int dk2::MyRooms::createRoom(
         int a2_roomTypeId,
         unsigned __int16 a3_playerId,
