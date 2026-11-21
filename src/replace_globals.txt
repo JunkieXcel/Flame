@@ -70,6 +70,7 @@
 
 # MyRooms
 004EC000 int MyRooms::createRooms(CWorld *)
+004EC360 int MyRooms::fun_4EC360()
 004EC490 int MyRooms::createRoom(int, uint16_t, uint16_t *)
 004ED1A0 int MyRooms::eventAttachAndReset(int, int, int, uint16_t, uint8_t, int8_t *, int)
 
