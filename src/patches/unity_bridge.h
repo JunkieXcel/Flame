@@ -17,8 +17,10 @@ namespace patch::unity_bridge {
     constexpr uint32_t c_mappingSize = 8 * 1024 * 1024;  // room for tiles and creatures later
     constexpr char c_magic[4] = {'F', 'L', 'U', 'B'};
     // v23-25 (2026-11-15, one feature; v23/v24 were test builds): objects' last position/facing, width/height scale
-    // and draw offset
-    constexpr uint32_t c_version = 25;
+    // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes.
+    // v27 (2026-11-20): objects' two tilt angles (in the old pad3 / pad4 slots, same size)
+    // v28 (2026-11-21): each object's art slot (in the old Object pad2 byte, same size)
+    constexpr uint32_t c_version = 28;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -262,7 +264,12 @@ namespace patch::unity_bridge {
         // CObject +0x8C/8D/8E). CRoom::fun_4E6220 sets it to the room terrain's ambient for room furniture (terrain flag
         // 0x20000000); 0 for most other objects; 255,255,255 while highlighted. Read as 0..255
         uint8_t baseColour[3];
-        uint8_t pad2;
+        // v28: which of the object type's models the engine draws now: (CRenderInfo +0x28 pWorldEntry - CObject +0x12D
+        // typeObj) / 27, the 27-byte CWorldEntry records of MyObjectDataObj: 1 = f1B (Objects.kwd art 4), 2 = f36 (art 3),
+        // 3 = f51 (art 0, the usual mesh), 4..7 = f6C[0..3] (art 5..8); 0 = f0 (art use not read); 255 = none / not one
+        // of them. E.g. the Prison Door: state 44 opens it with art 0 'dooropen', state 45 closes it with art 5
+        // 'doorclose' (CObject::state44_4A3640 / state45_4A36D0, read 2026-11-21, Research/Rooms.md)
+        uint8_t artSlot;
         // v19: CRenderInfo::lastFrame (+0x90), the animation phase at the previous game tick (1/4096 of the whole
         // animation, like currentFrame)
         int32_t lastFrame;
@@ -271,7 +278,10 @@ namespace patch::unity_bridge {
         // tickPercent256 (CPCEngineInterface::createCPhysicalThing 0x59D380, read for creatures)
         int32_t lastPos[3];
         uint16_t lastDirection;
-        uint16_t pad3;
+        // v27: CRenderInfo +0x20 (f20): a tilt angle, 2048 = full turn. createCEngineDynamicMesh (0x59CCF0) turns the
+        // still mesh by it, by tiltB and by the facing. Room furniture placement sets 0x600 for Torture Wheels (type 8,
+        // 0x4EE3FF), which lays them flat (read 2026-11-20, Research/Rooms.md)
+        uint16_t tiltA;
         // v23: CRenderInfo +0x4 _widthScale / +0x8 _heightScale, as for creatures: createCEngineDynamicMesh (0x59CD82,
         // 0x59CD8D, read 2026-11-15) sizes an object's still mesh by them too. 4096 = 1 for creatures (checked)
         uint32_t widthScale;
@@ -279,7 +289,9 @@ namespace patch::unity_bridge {
         // v24: CRenderInfo +0x51/+0x53/+0x55 (f51, f53, f55): an offset the engine adds to both pos and lastPos before
         // drawing (static_CRenderInfo_sub_59C2A0, read 2026-11-15), same units. E.g. lifts Library spell books
         int16_t drawOffset[3];
-        uint16_t pad4;
+        // v27: CRenderInfo +0x24 (f24): the second tilt angle, same units. CObject::state30 (0x4A1C60) spins a wheel by
+        // it (in its own plane) when it doesn't spin the facing
+        uint16_t tiltB;
     };
 
     // v20: one CRoom from the game's thing table. Tile::room is its tagId (MyMapElement::getRoom, 0x4559B0, is
@@ -294,6 +306,11 @@ namespace patch::unity_bridge {
         int32_t orientation;
         uint8_t firstSlab[2];  // CRoom +0x2D/+0x2E: the room's first (top-left) tile x, y (assumed; the gates use it so)
         uint16_t owner;  // CRoom +0x1D (playerId)
+        // v26: the room's door tile x, y; 255, 255 = none. Prison (type 11): CRoom +0x51/+0x55 (int32 each, read by
+        // CRoom::sub_4E3270, set by 0x4E32C0: 0, 0 when no tile qualifies). Combat Pit (type 16): CRoom +0x4B/+0x4F
+        // (sub_4D7160). CBridge::sub_443F20 draws only piece 14, whole and unturned, on that tile (read 2026-11-16)
+        uint8_t doorTile[2];
+        uint8_t pad[2];
     };
 
     // v22: one CCreature or CDeadBody from the game's thing table. Read 2026-11-14 (Research\Creatures.md)
@@ -433,7 +450,8 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Room, orientation) == 4);
     static_assert(offsetof(Room, firstSlab) == 8);
     static_assert(offsetof(Room, owner) == 10);
-    static_assert(sizeof(Room) == 12);
+    static_assert(offsetof(Room, doorTile) == 12);
+    static_assert(sizeof(Room) == 16);
     static_assert(offsetof(Object, tagId) == 12);
     static_assert(offsetof(Object, owner) == 14);
     static_assert(offsetof(Object, direction) == 16);
@@ -446,13 +464,15 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, floorHeight) == 36);
     static_assert(offsetof(Object, goldHeld) == 40);
     static_assert(offsetof(Object, baseColour) == 44);
-    static_assert(offsetof(Object, pad2) == 47);
+    static_assert(offsetof(Object, artSlot) == 47);
     static_assert(offsetof(Object, lastFrame) == 48);
     static_assert(offsetof(Object, lastPos) == 52);
     static_assert(offsetof(Object, lastDirection) == 64);
+    static_assert(offsetof(Object, tiltA) == 66);
     static_assert(offsetof(Object, widthScale) == 68);
     static_assert(offsetof(Object, heightScale) == 72);
     static_assert(offsetof(Object, drawOffset) == 76);
+    static_assert(offsetof(Object, tiltB) == 82);
     static_assert(sizeof(Object) == 84);
     static_assert(sizeof(TileBend) == 128);
     static_assert(offsetof(TileBend, known) == 120);

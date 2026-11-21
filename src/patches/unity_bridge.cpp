@@ -401,6 +401,18 @@ namespace {
         h.lightsState = LS_Exported;
     }
 
+    // v28: which of the object type's 8 models (27-byte CWorldEntry records of MyObjectDataObj) the engine draws now,
+    // 0..7; 255 = none or not one of them. See Object::artSlot
+    static_assert(sizeof(dk2::CWorldEntry) == 27);
+    static_assert(offsetof(dk2::CObject, typeObj) == 0x12D);
+    static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
+    uint8_t objectArtSlot(const dk2::CObject *o) {
+        if (!o->typeObj || !o->renderInfo.pWorldEntry) return 255;
+        intptr_t diff = (intptr_t) o->renderInfo.pWorldEntry - (intptr_t) o->typeObj;
+        if (diff < 0 || diff % 27 != 0 || diff / 27 >= 8) return 255;
+        return (uint8_t) (diff / 27);
+    }
+
     // copies every object in the game's thing table. called between the odd and even sequence, like the camera
     void writeObjects(patch::unity_bridge::Header &h, bool inLevel) {
         using namespace patch::unity_bridge;
@@ -445,19 +457,19 @@ namespace {
             r.baseColour[0] = (uint8_t) o->renderInfo.x48;
             r.baseColour[1] = (uint8_t) o->renderInfo.y49;
             r.baseColour[2] = (uint8_t) o->renderInfo.z4A;
-            r.pad2 = 0;
+            r.artSlot = objectArtSlot(o);
             r.lastFrame = o->renderInfo.lastFrame;
             r.lastPos[0] = o->lastPosition.x;
             r.lastPos[1] = o->lastPosition.y;
             r.lastPos[2] = o->lastPosition.z;
             r.lastDirection = o->lastAngle;
-            r.pad3 = 0;
+            r.tiltA = (uint16_t) o->renderInfo.f20;
             r.widthScale = o->renderInfo._widthScale;
             r.heightScale = o->renderInfo._heightScale;
             r.drawOffset[0] = o->renderInfo.f51;
             r.drawOffset[1] = o->renderInfo.f53;
             r.drawOffset[2] = o->renderInfo.f55;
-            r.pad4 = 0;
+            r.tiltB = o->renderInfo.f24;
         }
         h.objectsCount = count;
         h.objectsTyped = typed;
@@ -472,6 +484,9 @@ namespace {
     static_assert(offsetof(dk2::CRoom, specialTileOffset) == 0x80);
     static_assert(offsetof(dk2::CRoom, destroyed) == 0x9A);
     static_assert(offsetof(dk2::CRoom, orientation) == 0x9B);
+    // v26: the door tiles (Prison +0x51/+0x55, Combat Pit +0x4B/+0x4F) lie inside this 30-byte union
+    static_assert(offsetof(dk2::CRoom, field_49_union_start) == 0x49);
+    static_assert(0x55 + 4 <= 0x49 + sizeof(dk2::CRoom::field_49_union_start));
 
     // copies every room in the game's thing table. called between the odd and even sequence, like the camera
     void writeRooms(patch::unity_bridge::Header &h, bool inLevel) {
@@ -501,6 +516,18 @@ namespace {
             r.firstSlab[0] = room->firstSlab.x;
             r.firstSlab[1] = room->firstSlab.y;
             r.owner = room->playerId;
+            // v26: the door tile, from the room type's own two int32s inside CRoom's union (+0x49)
+            r.doorTile[0] = r.doorTile[1] = 255;
+            r.pad[0] = r.pad[1] = 0;
+            int doorAt = room->typeId == 11 ? 0x51 : room->typeId == 16 ? 0x4B : 0;
+            if (doorAt != 0) {
+                int32_t door[2];
+                std::memcpy(door, (const uint8_t *) room + doorAt, sizeof(door));
+                if (door[0] >= 0 && door[0] < 255 && door[1] >= 0 && door[1] < 255) {
+                    r.doorTile[0] = (uint8_t) door[0];
+                    r.doorTile[1] = (uint8_t) door[1];
+                }
+            }
         }
         h.roomsCount = count;
         h.roomsState = RS_Exported;
@@ -511,6 +538,8 @@ namespace {
     static_assert(offsetof(dk2::CThing, f24_playerId) == 0x28);
     static_assert(offsetof(dk2::CPhysicalThing, f3C_health) == 0x40);
     static_assert(offsetof(dk2::CPhysicalThing, renderInfo) == 0x44);
+    static_assert(offsetof(dk2::CRenderInfo, f20) == 0x20);  // v27 tilt angles, CObject +0x64 / +0x68
+    static_assert(offsetof(dk2::CRenderInfo, f24) == 0x24);
     static_assert(offsetof(dk2::CPhysicalThing, fF0_direction) == 0xF4);
     static_assert(offsetof(dk2::CMovingThing, lastPosition) == 0xF6);
     static_assert(offsetof(dk2::CMovingThing, lastAngle) == 0x102);
@@ -537,6 +566,8 @@ namespace {
     static_assert(offsetof(dk2::CRenderInfo, textureBank) == 0xAC);
     static_assert(offsetof(dk2::CRenderInfo, animationId) == 0xAE);
     static_assert(sizeof(dk2::CWorldEntry) == 27);
+    static_assert(offsetof(dk2::CObject, typeObj) == 0x12D);
+    static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
 
     // which of the type's 48 creature art slots (27-byte CWorldEntry records from the start of MyCreatureDataObj, read
     // 2026-11-14: MyCreatureDataObj::fun_494860) the render info draws. Slots 0..41 follow the animation ids; 42..47
