@@ -401,6 +401,18 @@ namespace {
         h.lightsState = LS_Exported;
     }
 
+    // v28: which of the object type's 8 models (27-byte CWorldEntry records of MyObjectDataObj) the engine draws now,
+    // 0..7; 255 = none or not one of them. See Object::artSlot
+    static_assert(sizeof(dk2::CWorldEntry) == 27);
+    static_assert(offsetof(dk2::CObject, typeObj) == 0x12D);
+    static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
+    uint8_t objectArtSlot(const dk2::CObject *o) {
+        if (!o->typeObj || !o->renderInfo.pWorldEntry) return 255;
+        intptr_t diff = (intptr_t) o->renderInfo.pWorldEntry - (intptr_t) o->typeObj;
+        if (diff < 0 || diff % 27 != 0 || diff / 27 >= 8) return 255;
+        return (uint8_t) (diff / 27);
+    }
+
     // copies every object in the game's thing table. called between the odd and even sequence, like the camera
     void writeObjects(patch::unity_bridge::Header &h, bool inLevel) {
         using namespace patch::unity_bridge;
@@ -445,7 +457,7 @@ namespace {
             r.baseColour[0] = (uint8_t) o->renderInfo.x48;
             r.baseColour[1] = (uint8_t) o->renderInfo.y49;
             r.baseColour[2] = (uint8_t) o->renderInfo.z4A;
-            r.pad2 = 0;
+            r.artSlot = objectArtSlot(o);
             r.lastFrame = o->renderInfo.lastFrame;
             r.lastPos[0] = o->lastPosition.x;
             r.lastPos[1] = o->lastPosition.y;
@@ -554,6 +566,8 @@ namespace {
     static_assert(offsetof(dk2::CRenderInfo, textureBank) == 0xAC);
     static_assert(offsetof(dk2::CRenderInfo, animationId) == 0xAE);
     static_assert(sizeof(dk2::CWorldEntry) == 27);
+    static_assert(offsetof(dk2::CObject, typeObj) == 0x12D);
+    static_assert(offsetof(dk2::CRenderInfo, pWorldEntry) == 0x28);
 
     // which of the type's 48 creature art slots (27-byte CWorldEntry records from the start of MyCreatureDataObj, read
     // 2026-11-14: MyCreatureDataObj::fun_494860) the render info draws. Slots 0..41 follow the animation ids; 42..47

@@ -19,7 +19,8 @@ namespace patch::unity_bridge {
     // v23-25 (2026-11-15, one feature; v23/v24 were test builds): objects' last position/facing, width/height scale
     // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes.
     // v27 (2026-11-20): objects' two tilt angles (in the old pad3 / pad4 slots, same size)
-    constexpr uint32_t c_version = 27;
+    // v28 (2026-11-21): each object's art slot (in the old Object pad2 byte, same size)
+    constexpr uint32_t c_version = 28;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -263,7 +264,12 @@ namespace patch::unity_bridge {
         // CObject +0x8C/8D/8E). CRoom::fun_4E6220 sets it to the room terrain's ambient for room furniture (terrain flag
         // 0x20000000); 0 for most other objects; 255,255,255 while highlighted. Read as 0..255
         uint8_t baseColour[3];
-        uint8_t pad2;
+        // v28: which of the object type's models the engine draws now: (CRenderInfo +0x28 pWorldEntry - CObject +0x12D
+        // typeObj) / 27, the 27-byte CWorldEntry records of MyObjectDataObj: 1 = f1B (Objects.kwd art 4), 2 = f36 (art 3),
+        // 3 = f51 (art 0, the usual mesh), 4..7 = f6C[0..3] (art 5..8); 0 = f0 (art use not read); 255 = none / not one
+        // of them. E.g. the Prison Door: state 44 opens it with art 0 'dooropen', state 45 closes it with art 5
+        // 'doorclose' (CObject::state44_4A3640 / state45_4A36D0, read 2026-11-21, Research/Rooms.md)
+        uint8_t artSlot;
         // v19: CRenderInfo::lastFrame (+0x90), the animation phase at the previous game tick (1/4096 of the whole
         // animation, like currentFrame)
         int32_t lastFrame;
@@ -458,7 +464,7 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Object, floorHeight) == 36);
     static_assert(offsetof(Object, goldHeld) == 40);
     static_assert(offsetof(Object, baseColour) == 44);
-    static_assert(offsetof(Object, pad2) == 47);
+    static_assert(offsetof(Object, artSlot) == 47);
     static_assert(offsetof(Object, lastFrame) == 48);
     static_assert(offsetof(Object, lastPos) == 52);
     static_assert(offsetof(Object, lastDirection) == 64);
