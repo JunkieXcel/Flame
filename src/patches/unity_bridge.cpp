@@ -605,6 +605,12 @@ namespace {
         r.pad[0] = r.pad[1] = r.pad[2] = 0;
         r.widthScale = p->renderInfo._widthScale;
         r.heightScale = p->renderInfo._heightScale;
+        r.tiltA = (uint16_t) p->renderInfo.f20;  // v29: createCEngineAnimMesh reads both (0x59C8F4 / 0x59C916)
+        r.tiltB = p->renderInfo.f24;
+        r.drawOffset[0] = p->renderInfo.f51;  // v29: the engine adds it before drawing (0x59C2A0)
+        r.drawOffset[1] = p->renderInfo.f53;
+        r.drawOffset[2] = p->renderInfo.f55;
+        r.pad2[0] = r.pad2[1] = 0;
     }
 
     // copies every creature and dead body in the game's thing table (creatures in the hand stay in it, with

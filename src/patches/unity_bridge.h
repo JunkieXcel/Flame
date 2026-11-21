@@ -20,7 +20,9 @@ namespace patch::unity_bridge {
     // and draw offset. v26 (2026-11-16): each room's door tile (Prison, Combat Pit), Room 12 -> 16 bytes.
     // v27 (2026-11-20): objects' two tilt angles (in the old pad3 / pad4 slots, same size)
     // v28 (2026-11-21): each object's art slot (in the old Object pad2 byte, same size)
-    constexpr uint32_t c_version = 28;
+    // v29-30 (2026-11-21, one feature; v29 was a test build without the offset): creatures' two tilt angles and
+    // draw offset, Creature 76 -> 88 bytes
+    constexpr uint32_t c_version = 30;
 
     // fixed places in the block after the header
     constexpr uint32_t c_terrainFlagsOffset = 4096;  // uint32_t[256]: MyTerrainDataObj::_flags of each terrain type
@@ -345,6 +347,14 @@ namespace patch::unity_bridge {
         uint8_t pad[3];
         uint32_t widthScale;  // render info +0x4 _widthScale: createCEngineAnimMesh reads it (units unchecked)
         int32_t heightScale;  // render info +0x8 _heightScale
+        // v29: render info +0x20 / +0x24, the same two tilt angles as Object::tiltA / tiltB (2048 = full turn).
+        // createCEngineAnimMesh (0x59C880) reads both (0x59C8F4, 0x59C916): a creature on a Torture Wheel lies flat
+        uint16_t tiltA;
+        uint16_t tiltB;
+        // v29: render info +0x51/+0x53/+0x55, like Object::drawOffset: static_CRenderInfo_sub_59C2A0 adds it to pos and
+        // lastPos, and createCEngineAnimMesh calls it too (0x59CA93). Lifts a creature onto a Torture Wheel (assumed)
+        int16_t drawOffset[3];
+        uint8_t pad2[2];
     };
 
     enum RoomFlags : uint8_t {
@@ -444,7 +454,10 @@ namespace patch::unity_bridge {
     static_assert(offsetof(Creature, textureBank) == 64);
     static_assert(offsetof(Creature, widthScale) == 68);
     static_assert(offsetof(Creature, heightScale) == 72);
-    static_assert(sizeof(Creature) == 76);
+    static_assert(offsetof(Creature, tiltA) == 76);
+    static_assert(offsetof(Creature, tiltB) == 78);
+    static_assert(offsetof(Creature, drawOffset) == 80);
+    static_assert(sizeof(Creature) == 88);
     static_assert(offsetof(Room, typeId) == 2);
     static_assert(offsetof(Room, flags) == 3);
     static_assert(offsetof(Room, orientation) == 4);
